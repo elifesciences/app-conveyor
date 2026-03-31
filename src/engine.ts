@@ -6,6 +6,7 @@ import { upsertPackage, upsertStepState, listPackages, getPackage } from "./db";
 import { fetchLatestCommit, buildStepState } from "./modules/git";
 import { syncGha } from "./modules/gha";
 import { syncGhcr } from "./modules/ghcr";
+import { syncGhPr } from "./modules/gh-pr";
 import { syncFluxImage } from "./modules/flux-image";
 import { syncFluxKustomize } from "./modules/flux-kustomize";
 import { syncK8sDeploy } from "./modules/k8s-deploy";
@@ -187,6 +188,8 @@ export class Engine {
         return syncGha(cfg, commitHash);
       case "ghcr":
         return syncGhcr(cfg, commitHash);
+      case "gh-pr":
+        return syncGhPr(cfg, imageTag);
       case "flux-image":
         return syncFluxImage(cfg, imageTag, imageDigest);
       case "flux-kustomize":

@@ -23,6 +23,7 @@ const STEP_TYPE_LABEL: Record<string, string> = {
   git: "Commit",
   gha: "Build",
   ghcr: "Image Ready",
+  "gh-pr": "PR Merged",
   "flux-image": "Flux Update",
   "flux-kustomize": "Flux Sync",
   "k8s-deploy": "Deploy Ready",

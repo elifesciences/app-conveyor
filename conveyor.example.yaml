@@ -1,6 +1,57 @@
 pipelines:
-  - id: epp-client
-    name: Enhanced Preprints Client
+  # Pipeline with Renovate-gated approval flow:
+  #
+  #   git → gha (build) → ghcr (image published)
+  #     → gh-pr (renovate PR + e2e tests + automerge)
+  #       → flux-image (approved ImagePolicy picks up new tag)
+  #         → flux-kustomize → k8s-deploy
+  #
+  - id: epp-client-staging
+    name: Enhanced Preprints Client (staging)
+    pollIntervalMs: 60000
+    steps:
+      - id: src
+        type: git
+        repo: elifesciences/enhanced-preprints-client
+        branch: master
+
+      - id: ci
+        type: gha
+        repo: elifesciences/enhanced-preprints-client
+        workflow: deploy.yaml
+
+      - id: reg
+        type: ghcr
+        image: ghcr.io/elifesciences/enhanced-preprints-client
+
+      # Renovate opens a PR in the config/test repo when a new image is
+      # detected. E2e tests run on the PR; on success it is automerged,
+      # which triggers another test run that pushes the -approved tag.
+      - id: pr
+        type: gh-pr
+        repo: elifesciences/enhanced-preprints-testing  # repo renovate targets
+        author: renovate[bot]
+
+      # ImagePolicy selects only the -approved variant of the tag
+      - id: auto
+        type: flux-image
+        policy: epp-client-approved
+        namespace: epp--staging
+
+      - id: sync
+        type: flux-kustomize
+        name: epp-client
+        automation: epp-client
+        namespace: epp--staging
+
+      - id: live
+        type: k8s-deploy
+        name: epp-client
+        namespace: epp--staging
+
+  # Simpler pipeline without the approval gate (e.g. prod tracks approved tag directly)
+  - id: epp-client-prod
+    name: Enhanced Preprints Client (prod)
     pollIntervalMs: 60000
     steps:
       - id: src
@@ -32,12 +83,3 @@ pipelines:
         type: k8s-deploy
         name: epp-client
         namespace: epp--prod
-
-  - id: another-app
-    name: Another App
-    steps:
-      - id: src
-        type: git
-        repo: elifesciences/another-app
-        branch: main
-      # ... more steps

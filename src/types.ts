@@ -4,6 +4,7 @@ export type StepType =
   | "git"
   | "gha"
   | "ghcr"
+  | "gh-pr"
   | "flux-image"
   | "flux-kustomize"
   | "k8s-deploy";
@@ -18,6 +19,8 @@ export interface StepConfig {
   workflow?: string;
   // ghcr
   image?: string;
+  // gh-pr
+  author?: string;     // filter PRs by author, e.g. "renovate[bot]"
   // flux-image
   policy?: string;
   imageRepository?: string;
