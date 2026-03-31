@@ -94,26 +94,25 @@ export function upsertPackage(pkg: Omit<Package, "steps">): void {
   db.run(
     `
     INSERT INTO packages (id, pipeline_id, commit_hash, repo, branch, author_name, message, created_at, updated_at, current_step)
-    VALUES ($id, $pipeline_id, $commit_hash, $repo, $branch, $author_name, $message, $created_at, $updated_at, $current_step)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       updated_at   = excluded.updated_at,
       current_step = excluded.current_step,
       author_name  = excluded.author_name,
       message      = excluded.message
   `,
-    {
-      $id: pkg.id,
-      $pipeline_id: pkg.pipelineId,
-      $commit_hash: pkg.commitHash,
-      $repo: pkg.repoFullName,
-      $branch: pkg.branch,
-      $author_name: pkg.authorName ?? null,
-      $message: pkg.message ?? null,
-      $created_at: pkg.createdAt,
-      $updated_at: pkg.updatedAt,
-      $current_step: pkg.currentStep,
-      // biome-ignore lint/suspicious/noExplicitAny: Bun SQLite named params not in type definitions
-    } as any,
+    [
+      pkg.id,
+      pkg.pipelineId,
+      pkg.commitHash,
+      pkg.repoFullName,
+      pkg.branch,
+      pkg.authorName ?? null,
+      pkg.message ?? null,
+      pkg.createdAt,
+      pkg.updatedAt,
+      pkg.currentStep,
+    ],
   );
 }
 
@@ -131,8 +130,7 @@ export function upsertStepState(packageId: string, state: StepState): void {
       (package_id, step_id, status, label, detail, updated_at,
        commit_hash, gha_run_id, image_digest, image_tag, sync_revision)
     VALUES
-      ($pkg, $step, $status, $label, $detail, $updated_at,
-       $commit_hash, $gha_run_id, $image_digest, $image_tag, $sync_revision)
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(package_id, step_id) DO UPDATE SET
       status        = excluded.status,
       label         = excluded.label,
@@ -144,37 +142,35 @@ export function upsertStepState(packageId: string, state: StepState): void {
       image_tag     = excluded.image_tag,
       sync_revision = excluded.sync_revision
   `,
-    {
-      $pkg: packageId,
-      $step: state.stepId,
-      $status: state.status,
-      $label: state.label,
-      $detail: state.detail ?? null,
-      $updated_at: state.updatedAt,
-      $commit_hash: state.commitHash ?? null,
-      $gha_run_id: state.ghaRunId ?? null,
-      $image_digest: state.imageDigest ?? null,
-      $image_tag: state.imageTag ?? null,
-      $sync_revision: state.syncRevision ?? null,
-      // biome-ignore lint/suspicious/noExplicitAny: Bun SQLite named params not in type definitions
-    } as any,
+    [
+      packageId,
+      state.stepId,
+      state.status,
+      state.label,
+      state.detail ?? null,
+      state.updatedAt,
+      state.commitHash ?? null,
+      state.ghaRunId ?? null,
+      state.imageDigest ?? null,
+      state.imageTag ?? null,
+      state.syncRevision ?? null,
+    ],
   );
 
   if (!prev || prev.status !== state.status) {
     db.run(
       `
       INSERT INTO step_history (package_id, step_id, status, label, detail, recorded_at)
-      VALUES ($pkg, $step, $status, $label, $detail, $recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?)
     `,
-      {
-        $pkg: packageId,
-        $step: state.stepId,
-        $status: state.status,
-        $label: state.label,
-        $detail: state.detail ?? null,
-        $recorded_at: state.updatedAt,
-        // biome-ignore lint/suspicious/noExplicitAny: Bun SQLite named params not in type definitions
-      } as any,
+      [
+        packageId,
+        state.stepId,
+        state.status,
+        state.label,
+        state.detail ?? null,
+        state.updatedAt,
+      ],
     );
   }
 }
