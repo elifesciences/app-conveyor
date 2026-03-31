@@ -1,15 +1,16 @@
 /**
  * Core polling engine. Iterates all pipeline steps for each active Package.
  */
-import type { PipelineConfig, Package, StepConfig, StepState } from "./types";
-import { upsertPackage, upsertStepState, listPackages, getPackage } from "./db";
-import { fetchLatestCommit, buildStepState } from "./modules/git";
-import { syncGha } from "./modules/gha";
-import { syncGhcr } from "./modules/ghcr";
-import { syncGhPr } from "./modules/gh-pr";
+
+import { getPackage, listPackages, upsertPackage, upsertStepState } from "./db";
 import { syncFluxImage } from "./modules/flux-image";
 import { syncFluxKustomize } from "./modules/flux-kustomize";
+import { syncGhPr } from "./modules/gh-pr";
+import { syncGha } from "./modules/gha";
+import { syncGhcr } from "./modules/ghcr";
+import { buildStepState, fetchLatestCommit } from "./modules/git";
 import { syncK8sDeploy } from "./modules/k8s-deploy";
+import type { Package, PipelineConfig, StepConfig, StepState } from "./types";
 import { now } from "./util";
 
 export class Engine {
@@ -24,7 +25,9 @@ export class Engine {
     const interval = this.cfg.pollIntervalMs ?? 60_000;
     this.poll().catch(console.error);
     this.timer = setInterval(() => this.poll().catch(console.error), interval);
-    console.log(`[engine:${this.cfg.id}] started, polling every ${interval / 1000}s`);
+    console.log(
+      `[engine:${this.cfg.id}] started, polling every ${interval / 1000}s`,
+    );
   }
 
   stop() {
@@ -41,31 +44,39 @@ export class Engine {
   // ─── Step 1: discover new commits from Git step ──────────────────────────
 
   private async discoverNewCommits() {
-    const gitSteps = this.cfg.steps.filter(s => s.type === "git");
+    const gitSteps = this.cfg.steps.filter((s) => s.type === "git");
     for (const step of gitSteps) {
-      console.log(`[engine:${this.cfg.id}] git: checking ${step.repo}/${step.branch}`);
+      console.log(
+        `[engine:${this.cfg.id}] git: checking ${step.repo}/${step.branch}`,
+      );
       try {
         const commit = await fetchLatestCommit(step);
         if (!commit) {
-          console.log(`[engine:${this.cfg.id}] git: no commit returned for ${step.repo}/${step.branch}`);
+          console.log(
+            `[engine:${this.cfg.id}] git: no commit returned for ${step.repo}/${step.branch}`,
+          );
           continue;
         }
 
         const pkgId = `${this.cfg.id}:${commit.sha}`;
         const existing = getPackage(pkgId);
         if (existing) {
-          console.log(`[engine:${this.cfg.id}] git: ${commit.sha.slice(0, 7)} already tracked`);
+          console.log(
+            `[engine:${this.cfg.id}] git: ${commit.sha.slice(0, 7)} already tracked`,
+          );
           continue;
         }
 
-        console.log(`[engine:${this.cfg.id}] new commit ${commit.sha.slice(0, 7)} on ${step.repo}/${step.branch}: ${commit.message}`);
+        console.log(
+          `[engine:${this.cfg.id}] new commit ${commit.sha.slice(0, 7)} on ${step.repo}/${step.branch}: ${commit.message}`,
+        );
 
         const pkg: Omit<Package, "steps"> = {
           id: pkgId,
           pipelineId: this.cfg.id,
           commitHash: commit.sha,
-          repoFullName: step.repo!,
-          branch: step.branch!,
+          repoFullName: step.repo ?? "",
+          branch: step.branch ?? "",
           authorName: commit.authorName,
           message: commit.message,
           createdAt: now(),
@@ -77,7 +88,7 @@ export class Engine {
         const gitState = buildStepState(step, commit);
         upsertStepState(pkgId, gitState);
 
-        for (const s of this.cfg.steps.filter(s2 => s2.type !== "git")) {
+        for (const s of this.cfg.steps.filter((s2) => s2.type !== "git")) {
           upsertStepState(pkgId, {
             stepId: s.id,
             status: "pending",
@@ -96,14 +107,14 @@ export class Engine {
   private async advancePackages() {
     const packages = listPackages(this.cfg.id, 100);
     for (const pkg of packages) {
-      const allPassed = pkg.steps.every(s => s.status === "passed");
+      const allPassed = pkg.steps.every((s) => s.status === "passed");
       if (allPassed) continue;
       await this.advancePackage(pkg);
     }
   }
 
   private async advancePackage(pkg: Package) {
-    const stepMap = new Map(pkg.steps.map(s => [s.stepId, s]));
+    const stepMap = new Map(pkg.steps.map((s) => [s.stepId, s]));
     const upstream = this.gatherUpstream(pkg.steps);
 
     for (const stepCfg of this.cfg.steps) {
@@ -115,17 +126,19 @@ export class Engine {
       let newState: StepState;
       try {
         newState = await this.syncStep(stepCfg, upstream);
-      } catch (e: any) {
+      } catch (e: unknown) {
         newState = {
           stepId: stepCfg.id,
           status: "failed",
           label: "err",
-          detail: String(e?.message ?? e),
+          detail: e instanceof Error ? e.message : String(e),
           updatedAt: now(),
         };
       }
 
-      console.log(`[engine:${this.cfg.id}] ${pkg.commitHash.slice(0, 7)} [${stepCfg.id}] → ${newState.status} (${newState.label})${newState.detail ? ` | ${newState.detail}` : ""}`);
+      console.log(
+        `[engine:${this.cfg.id}] ${pkg.commitHash.slice(0, 7)} [${stepCfg.id}] → ${newState.status} (${newState.label})${newState.detail ? ` | ${newState.detail}` : ""}`,
+      );
       upsertStepState(pkg.id, newState);
 
       if (newState.commitHash) upstream.commitHash = newState.commitHash;
@@ -135,7 +148,9 @@ export class Engine {
       if (newState.syncRevision) upstream.syncRevision = newState.syncRevision;
 
       if (newState.status === "failed") {
-        console.log(`[engine:${this.cfg.id}] ${pkg.commitHash.slice(0, 7)} stopped at [${stepCfg.id}]: failed`);
+        console.log(
+          `[engine:${this.cfg.id}] ${pkg.commitHash.slice(0, 7)} stopped at [${stepCfg.id}]: failed`,
+        );
         break;
       }
       if (newState.status === "pending" || newState.status === "running") {
@@ -177,7 +192,7 @@ export class Engine {
 
   private async syncStep(
     cfg: StepConfig,
-    upstream: ReturnType<typeof this.gatherUpstream>
+    upstream: ReturnType<typeof this.gatherUpstream>,
   ): Promise<StepState> {
     const commitHash = upstream.commitHash ?? "";
     const imageDigest = upstream.imageDigest ?? "";
@@ -201,7 +216,7 @@ export class Engine {
           stepId: cfg.id,
           status: "skipped",
           label: "–",
-          detail: `unknown step type: ${(cfg as any).type}`,
+          detail: `unknown step type: ${(cfg as { type: string }).type}`,
           updatedAt: now(),
         };
     }

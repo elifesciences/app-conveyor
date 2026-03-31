@@ -15,4 +15,4 @@ for (const pipeline of cfg.pipelines) {
 createServer(cfg, pollers);
 
 process.on("SIGTERM", () => process.exit(0));
-process.on("SIGINT",  () => process.exit(0));
+process.on("SIGINT", () => process.exit(0));

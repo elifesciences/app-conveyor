@@ -21,7 +21,7 @@ Default to using Bun instead of Node.js.
 
 ## Testing
 
-Use `bun test` to run tests. After any code change, run `bun run check` which runs both `tsc --noEmit` and `bun test`. Both must pass before a task is considered complete.
+Use `bun test` to run tests. After any code change, run `bun run check` which runs `biome check`, `tsc --noEmit`, and `bun test`. All three must pass before a task is considered complete.
 
 ```ts#index.test.ts
 import { test, expect } from "bun:test";

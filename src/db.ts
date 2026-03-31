@@ -1,5 +1,33 @@
 import { Database } from "bun:sqlite";
-import type { Package, StepState } from "./types";
+import type { Package, StepHistoryEntry, StepState } from "./types";
+
+interface PackageRow {
+  id: string;
+  pipeline_id: string;
+  commit_hash: string;
+  repo: string;
+  branch: string;
+  author_name: string | null;
+  message: string | null;
+  created_at: string;
+  updated_at: string;
+  current_step: number;
+}
+
+interface StepStateRow {
+  id: number;
+  package_id: string;
+  step_id: string;
+  status: string;
+  label: string;
+  detail: string | null;
+  updated_at: string;
+  commit_hash: string | null;
+  gha_run_id: string | null;
+  image_digest: string | null;
+  image_tag: string | null;
+  sync_revision: string | null;
+}
 
 let _db: Database | null = null;
 
@@ -63,7 +91,8 @@ function initSchema(db: Database) {
 
 export function upsertPackage(pkg: Omit<Package, "steps">): void {
   const db = getDb();
-  db.run(`
+  db.run(
+    `
     INSERT INTO packages (id, pipeline_id, commit_hash, repo, branch, author_name, message, created_at, updated_at, current_step)
     VALUES ($id, $pipeline_id, $commit_hash, $repo, $branch, $author_name, $message, $created_at, $updated_at, $current_step)
     ON CONFLICT(id) DO UPDATE SET
@@ -71,27 +100,33 @@ export function upsertPackage(pkg: Omit<Package, "steps">): void {
       current_step = excluded.current_step,
       author_name  = excluded.author_name,
       message      = excluded.message
-  `, {
-    $id: pkg.id,
-    $pipeline_id: pkg.pipelineId,
-    $commit_hash: pkg.commitHash,
-    $repo: pkg.repoFullName,
-    $branch: pkg.branch,
-    $author_name: pkg.authorName ?? null,
-    $message: pkg.message ?? null,
-    $created_at: pkg.createdAt,
-    $updated_at: pkg.updatedAt,
-    $current_step: pkg.currentStep,
-  } as any);
+  `,
+    {
+      $id: pkg.id,
+      $pipeline_id: pkg.pipelineId,
+      $commit_hash: pkg.commitHash,
+      $repo: pkg.repoFullName,
+      $branch: pkg.branch,
+      $author_name: pkg.authorName ?? null,
+      $message: pkg.message ?? null,
+      $created_at: pkg.createdAt,
+      $updated_at: pkg.updatedAt,
+      $current_step: pkg.currentStep,
+      // biome-ignore lint/suspicious/noExplicitAny: Bun SQLite named params not in type definitions
+    } as any,
+  );
 }
 
 export function upsertStepState(packageId: string, state: StepState): void {
   const db = getDb();
-  const prev = db.query<{ status: string; label: string }, [string, string]>(
-    "SELECT status, label FROM step_states WHERE package_id = ? AND step_id = ?"
-  ).get(packageId, state.stepId);
+  const prev = db
+    .query<{ status: string; label: string }, [string, string]>(
+      "SELECT status, label FROM step_states WHERE package_id = ? AND step_id = ?",
+    )
+    .get(packageId, state.stepId);
 
-  db.run(`
+  db.run(
+    `
     INSERT INTO step_states
       (package_id, step_id, status, label, detail, updated_at,
        commit_hash, gha_run_id, image_digest, image_tag, sync_revision)
@@ -108,65 +143,82 @@ export function upsertStepState(packageId: string, state: StepState): void {
       image_digest  = excluded.image_digest,
       image_tag     = excluded.image_tag,
       sync_revision = excluded.sync_revision
-  `, {
-    $pkg: packageId,
-    $step: state.stepId,
-    $status: state.status,
-    $label: state.label,
-    $detail: state.detail ?? null,
-    $updated_at: state.updatedAt,
-    $commit_hash: state.commitHash ?? null,
-    $gha_run_id: state.ghaRunId ?? null,
-    $image_digest: state.imageDigest ?? null,
-    $image_tag: state.imageTag ?? null,
-    $sync_revision: state.syncRevision ?? null,
-  } as any);
-
-  if (!prev || prev.status !== state.status) {
-    db.run(`
-      INSERT INTO step_history (package_id, step_id, status, label, detail, recorded_at)
-      VALUES ($pkg, $step, $status, $label, $detail, $recorded_at)
-    `, {
+  `,
+    {
       $pkg: packageId,
       $step: state.stepId,
       $status: state.status,
       $label: state.label,
       $detail: state.detail ?? null,
-      $recorded_at: state.updatedAt,
-    } as any);
+      $updated_at: state.updatedAt,
+      $commit_hash: state.commitHash ?? null,
+      $gha_run_id: state.ghaRunId ?? null,
+      $image_digest: state.imageDigest ?? null,
+      $image_tag: state.imageTag ?? null,
+      $sync_revision: state.syncRevision ?? null,
+      // biome-ignore lint/suspicious/noExplicitAny: Bun SQLite named params not in type definitions
+    } as any,
+  );
+
+  if (!prev || prev.status !== state.status) {
+    db.run(
+      `
+      INSERT INTO step_history (package_id, step_id, status, label, detail, recorded_at)
+      VALUES ($pkg, $step, $status, $label, $detail, $recorded_at)
+    `,
+      {
+        $pkg: packageId,
+        $step: state.stepId,
+        $status: state.status,
+        $label: state.label,
+        $detail: state.detail ?? null,
+        $recorded_at: state.updatedAt,
+        // biome-ignore lint/suspicious/noExplicitAny: Bun SQLite named params not in type definitions
+      } as any,
+    );
   }
 }
 
 export function getPackage(id: string): Package | null {
   const db = getDb();
-  const row = db.query<any, [string]>(
-    "SELECT * FROM packages WHERE id = ?"
-  ).get(id);
+  const row = db
+    .query<PackageRow, [string]>("SELECT * FROM packages WHERE id = ?")
+    .get(id);
   if (!row) return null;
   return hydrate(db, row);
 }
 
-export function findPackageByCommitPrefix(pipelineId: string, prefix: string): Package | null {
+export function findPackageByCommitPrefix(
+  pipelineId: string,
+  prefix: string,
+): Package | null {
   const db = getDb();
-  const rows = db.query<any, [string]>(
-    "SELECT * FROM packages WHERE pipeline_id = ? ORDER BY created_at DESC LIMIT 200"
-  ).all(pipelineId);
-  const row = rows.find(r => r.commit_hash.startsWith(prefix));
+  const rows = db
+    .query<PackageRow, [string]>(
+      "SELECT * FROM packages WHERE pipeline_id = ? ORDER BY created_at DESC LIMIT 200",
+    )
+    .all(pipelineId);
+  const row = rows.find((r) => r.commit_hash.startsWith(prefix));
   return row ? hydrate(db, row) : null;
 }
 
 export function listPackages(pipelineId: string, limit = 50): Package[] {
   const db = getDb();
-  const rows = db.query<any, [string, number]>(
-    "SELECT * FROM packages WHERE pipeline_id = ? ORDER BY created_at DESC LIMIT ?"
-  ).all(pipelineId, limit);
-  return rows.map(r => hydrate(db, r));
+  const rows = db
+    .query<PackageRow, [string, number]>(
+      "SELECT * FROM packages WHERE pipeline_id = ? ORDER BY created_at DESC LIMIT ?",
+    )
+    .all(pipelineId, limit);
+  return rows.map((r) => hydrate(db, r));
 }
 
-function hydrate(db: Database, row: any): Package {
-  const steps = db.query<any, [string]>(
-    "SELECT * FROM step_states WHERE package_id = ? ORDER BY id ASC"
-  ).all(row.id).map(rowToStep);
+function hydrate(db: Database, row: PackageRow): Package {
+  const steps = db
+    .query<StepStateRow, [string]>(
+      "SELECT * FROM step_states WHERE package_id = ? ORDER BY id ASC",
+    )
+    .all(row.id)
+    .map(rowToStep);
 
   return {
     id: row.id,
@@ -183,10 +235,10 @@ function hydrate(db: Database, row: any): Package {
   };
 }
 
-function rowToStep(r: any): StepState {
+function rowToStep(r: StepStateRow): StepState {
   return {
     stepId: r.step_id,
-    status: r.status,
+    status: r.status as StepState["status"],
     label: r.label,
     detail: r.detail ?? undefined,
     updatedAt: r.updated_at,
@@ -198,9 +250,14 @@ function rowToStep(r: any): StepState {
   };
 }
 
-export function getStepHistory(packageId: string, stepId: string) {
+export function getStepHistory(
+  packageId: string,
+  stepId: string,
+): StepHistoryEntry[] {
   const db = getDb();
-  return db.query<any, [string, string]>(
-    "SELECT * FROM step_history WHERE package_id = ? AND step_id = ? ORDER BY id DESC LIMIT 20"
-  ).all(packageId, stepId);
+  return db
+    .query<StepHistoryEntry, [string, string]>(
+      "SELECT * FROM step_history WHERE package_id = ? AND step_id = ? ORDER BY id DESC LIMIT 20",
+    )
+    .all(packageId, stepId);
 }

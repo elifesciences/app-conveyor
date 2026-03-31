@@ -16,14 +16,35 @@
  *
  * Without automation configured, falls back to the imageTag timestamp heuristic.
  */
-import type { StepConfig, StepState } from "../types";
 import { getKubeClient } from "../kube";
-import { now } from "../util";
+import type { StepConfig, StepState } from "../types";
+import { errorMessage, isK8sNotFound, now } from "../util";
+
+interface FluxCondition {
+  type: string;
+  status: string;
+  message?: string;
+  lastTransitionTime?: string;
+}
+
+interface FluxAutomation {
+  status?: {
+    lastPushTime?: string;
+    lastPushCommit?: string;
+  };
+}
+
+interface FluxKustomization {
+  status?: {
+    lastAppliedRevision?: string;
+    conditions?: FluxCondition[];
+  };
+}
 
 export async function syncFluxKustomize(
   cfg: StepConfig,
   commitHash: string,
-  imageTag: string
+  imageTag: string,
 ): Promise<StepState> {
   const base: Omit<StepState, "status" | "label" | "detail"> = {
     stepId: cfg.id,
@@ -32,7 +53,12 @@ export async function syncFluxKustomize(
   };
 
   if (!cfg.name) {
-    return { ...base, status: "skipped", label: "–", detail: "kustomization name not configured" };
+    return {
+      ...base,
+      status: "skipped",
+      label: "–",
+      detail: "kustomization name not configured",
+    };
   }
 
   const namespace = cfg.namespace ?? "flux-system";
@@ -47,40 +73,50 @@ export async function syncFluxKustomize(
 
     if (cfg.automation) {
       try {
-        const automation = await customObjects.getNamespacedCustomObject({
+        const automation = (await customObjects.getNamespacedCustomObject({
           group: "image.toolkit.fluxcd.io",
           version: "v1beta2",
           namespace,
           plural: "imageupdateautomations",
           name: cfg.automation,
-        }) as any;
+        })) as FluxAutomation;
 
-        const rawPushTime: string | undefined = automation?.status?.lastPushTime;
-        lastPushCommit = automation?.status?.lastPushCommit as string | undefined;
+        const rawPushTime: string | undefined =
+          automation?.status?.lastPushTime;
+        lastPushCommit = automation?.status?.lastPushCommit;
         if (rawPushTime) lastPushTime = new Date(rawPushTime);
-      } catch (e: any) {
-        if (e?.statusCode === 404 || e?.response?.statusCode === 404) {
-          return { ...base, status: "pending", label: "waiting", detail: `ImageUpdateAutomation ${cfg.automation} not found` };
+      } catch (e: unknown) {
+        if (isK8sNotFound(e)) {
+          return {
+            ...base,
+            status: "pending",
+            label: "waiting",
+            detail: `ImageUpdateAutomation ${cfg.automation} not found`,
+          };
         }
         throw e;
       }
     }
 
     // ── 2. Kustomization ─────────────────────────────────────────────────────
-    const ks = await customObjects.getNamespacedCustomObject({
+    const ks = (await customObjects.getNamespacedCustomObject({
       group: "kustomize.toolkit.fluxcd.io",
       version: "v1",
       namespace,
       plural: "kustomizations",
-      name: cfg.name!,
-    }) as any;
+      name: cfg.name ?? "",
+    })) as FluxKustomization;
 
     const lastAppliedRevision: string = ks?.status?.lastAppliedRevision ?? "";
-    const readyCondition = ks?.status?.conditions?.find((c: any) => c.type === "Ready");
+    const readyCondition = ks?.status?.conditions?.find(
+      (c) => c.type === "Ready",
+    );
     const readyStatus: string = readyCondition?.status ?? "Unknown";
     const message: string = readyCondition?.message ?? "";
 
-    const shortRev = lastAppliedRevision.split(":").pop()?.slice(0, 7) ?? lastAppliedRevision.slice(0, 7);
+    const shortRev =
+      lastAppliedRevision.split(":").pop()?.slice(0, 7) ??
+      lastAppliedRevision.slice(0, 7);
 
     // ── 3. Automation path ────────────────────────────────────────────────────
     if (cfg.automation) {
@@ -121,9 +157,13 @@ export async function syncFluxKustomize(
         detail: [
           `${cfg.name}: ${lastAppliedRevision}`,
           `push: ${lastPushCommit.slice(0, 7)}`,
-          pushApplied ? "push applied ✓" : "waiting for kustomization to apply push commit",
+          pushApplied
+            ? "push applied ✓"
+            : "waiting for kustomization to apply push commit",
           message,
-        ].filter(Boolean).join(" | "),
+        ]
+          .filter(Boolean)
+          .join(" | "),
         syncRevision: lastAppliedRevision,
       };
     }
@@ -131,7 +171,8 @@ export async function syncFluxKustomize(
     // ── 4. Fallback: no automation configured — use imageTag timestamp ─────────
     const imageBuiltAt = parseTagTimestamp(imageTag);
     const conditionTime = new Date(readyCondition?.lastTransitionTime ?? 0);
-    const reconciledAfterImage = imageBuiltAt === null || conditionTime >= imageBuiltAt;
+    const reconciledAfterImage =
+      imageBuiltAt === null || conditionTime >= imageBuiltAt;
 
     let status: StepState["status"];
     if (readyStatus === "True" && reconciledAfterImage) status = "passed";
@@ -145,11 +186,16 @@ export async function syncFluxKustomize(
       detail: `${cfg.name}: ${lastAppliedRevision} | ${message}`,
       syncRevision: lastAppliedRevision,
     };
-  } catch (e: any) {
-    if (e?.statusCode === 404 || e?.response?.statusCode === 404) {
-      return { ...base, status: "pending", label: "waiting", detail: `Kustomization ${cfg.name} not found` };
+  } catch (e: unknown) {
+    if (isK8sNotFound(e)) {
+      return {
+        ...base,
+        status: "pending",
+        label: "waiting",
+        detail: `Kustomization ${cfg.name} not found`,
+      };
     }
-    return { ...base, status: "failed", label: "err", detail: String(e?.message ?? e) };
+    return { ...base, status: "failed", label: "err", detail: errorMessage(e) };
   }
 }
 
@@ -159,7 +205,7 @@ export async function syncFluxKustomize(
  */
 function parseTagTimestamp(imageTag: string): Date | null {
   const m = imageTag.match(/-(\d{8})\.(\d{4})(?:-|$)/);
-  if (!m || !m[1] || !m[2]) return null;
+  if (!m?.[1] || !m[2]) return null;
   const iso = `${m[1].slice(0, 4)}-${m[1].slice(4, 6)}-${m[1].slice(6, 8)}T${m[2].slice(0, 2)}:${m[2].slice(2, 4)}:00Z`;
   return new Date(iso);
 }

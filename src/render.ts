@@ -1,4 +1,9 @@
-import type { Package, StepState, StepConfig, PipelineConfig } from "./types";
+import type {
+  Package,
+  PipelineConfig,
+  StepConfig,
+  StepHistoryEntry,
+} from "./types";
 import { relativeTime } from "./util";
 
 // ─── Status helpers ────────────────────────────────────────────────────────
@@ -35,10 +40,10 @@ function stepLabel(type: string): string {
 
 /** Derives an overall status from a package's steps for the landing page summary. */
 function packageOverallStatus(pkg: Package): string {
-  const statuses = pkg.steps.map(s => s.status);
-  if (statuses.every(s => s === "passed" || s === "skipped")) return "passed";
-  if (statuses.some(s => s === "failed")) return "failed";
-  if (statuses.some(s => s === "running")) return "running";
+  const statuses = pkg.steps.map((s) => s.status);
+  if (statuses.every((s) => s === "passed" || s === "skipped")) return "passed";
+  if (statuses.some((s) => s === "failed")) return "failed";
+  if (statuses.some((s) => s === "running")) return "running";
   return "pending";
 }
 
@@ -327,20 +332,22 @@ function gridTemplate(stepCount: number): string {
 
 export function renderLandingPage(
   summaries: Array<{ pipeline: PipelineConfig; latest: Package | null }>,
-  now: Date
+  now: Date,
 ): string {
-  const cards = summaries.map(({ pipeline, latest }) => {
-    const status = latest ? packageOverallStatus(latest) : "pending";
-    const lastInfo = latest
-      ? `<span class="commit-ref">${latest.commitHash.slice(0, 7)}</span>${escHtml(latest.message?.slice(0, 60) ?? "")} &middot; ${relativeTime(latest.createdAt)}`
-      : `<span>No commits tracked yet</span>`;
+  const cards = summaries
+    .map(({ pipeline, latest }) => {
+      const status = latest ? packageOverallStatus(latest) : "pending";
+      const lastInfo = latest
+        ? `<span class="commit-ref">${latest.commitHash.slice(0, 7)}</span>${escHtml(latest.message?.slice(0, 60) ?? "")} &middot; ${relativeTime(latest.createdAt)}`
+        : `<span>No commits tracked yet</span>`;
 
-    return `<a class="pipeline-card" href="/pipeline/${escHtml(pipeline.id)}">
+      return `<a class="pipeline-card" href="/pipeline/${escHtml(pipeline.id)}">
       <div class="status-dot ${status}"></div>
       <div class="pipeline-name">${escHtml(pipeline.name)}</div>
       <div class="pipeline-last">${lastInfo}</div>
     </a>`;
-  }).join("");
+    })
+    .join("");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -373,18 +380,25 @@ export function renderLandingPage(
 export function renderDashboard(
   packages: Package[],
   cfg: PipelineConfig,
-  now: Date
+  now: Date,
 ): string {
-  const steps = cfg.steps.filter(s => s.type !== "git");
+  const steps = cfg.steps.filter((s) => s.type !== "git");
   const grid = gridTemplate(steps.length);
 
-  const headerCols = steps.map(s => `
+  const headerCols = steps
+    .map(
+      (s) => `
     <div class="belt-col-label">${stepLabel(s.type)}</div>
-  `).join("");
+  `,
+    )
+    .join("");
 
-  const rows = packages.length === 0
-    ? `<div class="empty-state">No commits tracked yet. Waiting for first commit…</div>`
-    : packages.map(pkg => renderPackageRow(pkg, steps, grid, cfg.id)).join("");
+  const rows =
+    packages.length === 0
+      ? `<div class="empty-state">No commits tracked yet. Waiting for first commit…</div>`
+      : packages
+          .map((pkg) => renderPackageRow(pkg, steps, grid, cfg.id))
+          .join("");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -420,37 +434,46 @@ export function renderDashboard(
 </html>`;
 }
 
-function renderPackageRow(pkg: Package, steps: StepConfig[], grid: string, pipelineId: string): string {
-  const stepMap = new Map(pkg.steps.map(s => [s.stepId, s]));
+function renderPackageRow(
+  pkg: Package,
+  steps: StepConfig[],
+  grid: string,
+  pipelineId: string,
+): string {
+  const stepMap = new Map(pkg.steps.map((s) => [s.stepId, s]));
   const age = relativeTime(pkg.createdAt);
   const shortCommit = pkg.commitHash.slice(0, 7);
   const msgTrunc = (pkg.message ?? "").slice(0, 48);
 
-  const stepCells = steps.map(cfg => {
-    const state = stepMap.get(cfg.id);
-    if (!state) {
-      return `<div class="step-cell pending" title="not yet initialized">
+  const stepCells = steps
+    .map((cfg) => {
+      const state = stepMap.get(cfg.id);
+      if (!state) {
+        return `<div class="step-cell pending" title="not yet initialized">
         <span class="step-badge">Wait</span>
         <span class="step-value">…</span>
       </div>`;
-    }
+      }
 
-    const cls = STATUS_CLASS[state.status] ?? "pending";
-    const badge = STATUS_LABEL[state.status] ?? state.status;
-    const tooltip = [
-      `${stepLabel(cfg.type)} [${cfg.id}]`,
-      `status: ${state.status}`,
-      state.detail ? `\n${state.detail}` : "",
-      `\nupdated: ${state.updatedAt.slice(0, 19).replace("T", " ")}`,
-    ].filter(Boolean).join(" ");
+      const cls = STATUS_CLASS[state.status] ?? "pending";
+      const badge = STATUS_LABEL[state.status] ?? state.status;
+      const tooltip = [
+        `${stepLabel(cfg.type)} [${cfg.id}]`,
+        `status: ${state.status}`,
+        state.detail ? `\n${state.detail}` : "",
+        `\nupdated: ${state.updatedAt.slice(0, 19).replace("T", " ")}`,
+      ]
+        .filter(Boolean)
+        .join(" ");
 
-    const isActive = state.status === "running";
+      const isActive = state.status === "running";
 
-    return `<div class="step-cell ${cls}${isActive ? " active-step" : ""}" title="${escHtml(tooltip)}">
+      return `<div class="step-cell ${cls}${isActive ? " active-step" : ""}" title="${escHtml(tooltip)}">
       <span class="step-badge">${badge}</span>
       <span class="step-value">${escHtml(state.label)}</span>
     </div>`;
-  }).join("");
+    })
+    .join("");
 
   return `<a class="package-row" style="${grid}" href="/pipeline/${escHtml(pipelineId)}/package/${shortCommit}">
     <div class="pkg-meta">
@@ -464,7 +487,11 @@ function renderPackageRow(pkg: Package, steps: StepConfig[], grid: string, pipel
 
 // ─── Package detail ───────────────────────────────────────────────────────
 
-export function renderPackageDetail(pkg: Package, pipeline: PipelineConfig, history: any[]): string {
+export function renderPackageDetail(
+  pkg: Package,
+  pipeline: PipelineConfig,
+  history: StepHistoryEntry[],
+): string {
   const detailCSS = `
     ${CSS}
     .step-detail { border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; background: var(--surface); }
@@ -482,34 +509,44 @@ export function renderPackageDetail(pkg: Package, pipeline: PipelineConfig, hist
     a.breadcrumb:hover { text-decoration: underline; }
   `;
 
-  const steps = pipeline.steps.filter(s => s.type !== "git");
-  const rows = steps.map(s => {
-    const state = pkg.steps.find(ps => ps.stepId === s.id);
-    const hist = history.filter(h => h.step_id === s.id);
-    const histRows = hist.map(h => `
+  const steps = pipeline.steps.filter((s) => s.type !== "git");
+  const rows = steps
+    .map((s) => {
+      const state = pkg.steps.find((ps) => ps.stepId === s.id);
+      const hist = history.filter((h) => h.step_id === s.id);
+      const histRows = hist
+        .map(
+          (h) => `
       <tr>
         <td>${h.recorded_at.slice(0, 19).replace("T", " ")}</td>
-        <td class="${STATUS_CLASS[h.status] ?? ''}">${h.status}</td>
+        <td class="${STATUS_CLASS[h.status] ?? ""}">${h.status}</td>
         <td>${escHtml(h.label)}</td>
         <td>${escHtml(h.detail ?? "")}</td>
       </tr>
-    `).join("");
+    `,
+        )
+        .join("");
 
-    const statusCls = state ? (STATUS_CLASS[state.status] ?? "") : "pending";
-    const statusTxt = state?.status ?? "pending";
+      const statusCls = state ? (STATUS_CLASS[state.status] ?? "") : "pending";
+      const statusTxt = state?.status ?? "pending";
 
-    return `
+      return `
       <section class="step-detail">
         <h3>${escHtml(stepLabel(s.type))} <span class="badge ${statusCls}">${statusTxt}</span></h3>
         <p class="detail-text">${escHtml(state?.detail ?? "")}</p>
-        ${hist.length > 0 ? `
+        ${
+          hist.length > 0
+            ? `
         <table class="hist-table">
           <thead><tr><th>Time</th><th>Status</th><th>Label</th><th>Detail</th></tr></thead>
           <tbody>${histRows}</tbody>
-        </table>` : ""}
+        </table>`
+            : ""
+        }
       </section>
     `;
-  }).join("");
+    })
+    .join("");
 
   return `<!DOCTYPE html>
 <html lang="en">

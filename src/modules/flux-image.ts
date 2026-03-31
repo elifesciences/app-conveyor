@@ -1,14 +1,27 @@
 /**
  * Flux Automation — checks if Flux ImagePolicy has picked up the new tag.
  */
-import type { StepConfig, StepState } from "../types";
 import { getKubeClient } from "../kube";
-import { now } from "../util";
+import type { StepConfig, StepState } from "../types";
+import { errorMessage, isK8sNotFound, now } from "../util";
+
+interface FluxCondition {
+  type: string;
+  status: string;
+  message?: string;
+}
+
+interface FluxImagePolicy {
+  status?: {
+    latestRef?: { tag?: string };
+    conditions?: FluxCondition[];
+  };
+}
 
 export async function syncFluxImage(
   cfg: StepConfig,
   imageTag: string,
-  imageDigest: string
+  imageDigest: string,
 ): Promise<StepState> {
   const base: Omit<StepState, "status" | "label" | "detail"> = {
     stepId: cfg.id,
@@ -18,7 +31,12 @@ export async function syncFluxImage(
   };
 
   if (!cfg.policy) {
-    return { ...base, status: "skipped", label: "–", detail: "policy not configured" };
+    return {
+      ...base,
+      status: "skipped",
+      label: "–",
+      detail: "policy not configured",
+    };
   }
 
   const namespace = cfg.namespace ?? "flux-system";
@@ -27,25 +45,33 @@ export async function syncFluxImage(
     const client = getKubeClient();
     const customObjects = client.customObjects;
 
-    const policy = await customObjects.getNamespacedCustomObject({
+    const policy = (await customObjects.getNamespacedCustomObject({
       group: "image.toolkit.fluxcd.io",
       version: "v1beta2",
       namespace,
       plural: "imagepolicies",
       name: cfg.policy,
-    }) as any;
+    })) as FluxImagePolicy;
 
     // v1beta2 ImagePolicy: status.latestRef.tag holds the selected tag
     const latestTag: string = policy?.status?.latestRef?.tag ?? "";
-    const ready = policy?.status?.conditions?.find(
-      (c: any) => c.type === "Ready"
-    );
+    const ready = policy?.status?.conditions?.find((c) => c.type === "Ready");
 
     if (!latestTag) {
-      return { ...base, status: "pending", label: "waiting", detail: "no latestRef yet" };
+      return {
+        ...base,
+        status: "pending",
+        label: "waiting",
+        detail: "no latestRef yet",
+      };
     }
     if (!imageTag) {
-      return { ...base, status: "pending", label: "waiting", detail: "waiting for image tag from registry step" };
+      return {
+        ...base,
+        status: "pending",
+        label: "waiting",
+        detail: "waiting for image tag from registry step",
+      };
     }
 
     // Check if the policy has selected our tag (or a tag containing our hash)
@@ -57,10 +83,15 @@ export async function syncFluxImage(
       label: latestTag.slice(0, 12),
       detail: `latestRef.tag: ${latestTag} | ${ready?.message ?? ""}`,
     };
-  } catch (e: any) {
-    if (e?.statusCode === 404 || e?.response?.statusCode === 404) {
-      return { ...base, status: "pending", label: "waiting", detail: `ImagePolicy ${cfg.policy} not found` };
+  } catch (e: unknown) {
+    if (isK8sNotFound(e)) {
+      return {
+        ...base,
+        status: "pending",
+        label: "waiting",
+        detail: `ImagePolicy ${cfg.policy} not found`,
+      };
     }
-    return { ...base, status: "failed", label: "err", detail: String(e?.message ?? e) };
+    return { ...base, status: "failed", label: "err", detail: errorMessage(e) };
   }
 }

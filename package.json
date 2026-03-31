@@ -8,9 +8,10 @@
     "dev": "bun --watch run index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "check": "bun run typecheck && bun run test"
+    "check": "bunx biome check && bun run typecheck && bun run test"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
     "@happy-dom/global-registrator": "^20.8.9",
     "@types/bun": "latest",
     "@types/node": "^25.5.0"

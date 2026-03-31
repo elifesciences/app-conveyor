@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 
-import { test, expect, beforeEach } from "bun:test";
+import { expect, test } from "bun:test";
 import { renderDashboard, renderPackageDetail } from "../render";
 import type { Package, PipelineConfig } from "../types";
 
@@ -8,8 +8,8 @@ const cfg: PipelineConfig = {
   id: "test-pipeline",
   name: "Test App",
   steps: [
-    { id: "src", type: "git",  repo: "my-org/app", branch: "main" },
-    { id: "ci",  type: "gha",  workflow: "deploy.yaml" },
+    { id: "src", type: "git", repo: "my-org/app", branch: "main" },
+    { id: "ci", type: "gha", workflow: "deploy.yaml" },
     { id: "reg", type: "ghcr", image: "ghcr.io/my-org/app" },
   ],
 };
@@ -27,9 +27,25 @@ function makePkg(overrides: Partial<Package> = {}): Package {
     updatedAt: new Date().toISOString(),
     currentStep: 1,
     steps: [
-      { stepId: "src", status: "passed",  label: "abc1234", updatedAt: new Date().toISOString(), commitHash: "abc1234abc1234abc1234abc1234abc1234abc123" },
-      { stepId: "ci",  status: "running", label: "#123456", updatedAt: new Date().toISOString() },
-      { stepId: "reg", status: "pending", label: "…",       updatedAt: new Date().toISOString() },
+      {
+        stepId: "src",
+        status: "passed",
+        label: "abc1234",
+        updatedAt: new Date().toISOString(),
+        commitHash: "abc1234abc1234abc1234abc1234abc1234abc123",
+      },
+      {
+        stepId: "ci",
+        status: "running",
+        label: "#123456",
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        stepId: "reg",
+        status: "pending",
+        label: "…",
+        updatedAt: new Date().toISOString(),
+      },
     ],
     ...overrides,
   };
@@ -42,7 +58,9 @@ function parse(html: string): Document {
 // ─── renderDashboard ──────────────────────────────────────────────────────────
 
 test("renderDashboard sets page title to pipeline name", () => {
-  const doc = parse(renderDashboard([makePkg()], cfg, new Date("2025-01-01T12:00:00Z")));
+  const doc = parse(
+    renderDashboard([makePkg()], cfg, new Date("2025-01-01T12:00:00Z")),
+  );
   expect(doc.title).toBe("Test App — App Conveyor");
 });
 
@@ -54,7 +72,9 @@ test("renderDashboard renders pipeline name in the header", () => {
 
 test("renderDashboard renders non-git steps as column headers only", () => {
   const doc = parse(renderDashboard([makePkg()], cfg, new Date()));
-  const labels = Array.from(doc.querySelectorAll(".belt-col-label")).map(el => el.textContent?.trim());
+  const labels = Array.from(doc.querySelectorAll(".belt-col-label")).map((el) =>
+    el.textContent?.trim(),
+  );
   expect(labels).toEqual(["Build", "Image Ready"]);
 });
 
@@ -71,7 +91,9 @@ test("renderDashboard renders commit message in the meta column", () => {
 test("renderDashboard links each row to the package detail page", () => {
   const doc = parse(renderDashboard([makePkg()], cfg, new Date()));
   const row = doc.querySelector(".package-row");
-  expect(row?.getAttribute("href")).toBe("/pipeline/test-pipeline/package/abc1234");
+  expect(row?.getAttribute("href")).toBe(
+    "/pipeline/test-pipeline/package/abc1234",
+  );
 });
 
 test("renderDashboard renders running step with correct badge and status class", () => {
@@ -79,7 +101,9 @@ test("renderDashboard renders running step with correct badge and status class",
   const runningCell = doc.querySelector(".step-cell.running");
   expect(runningCell).not.toBeNull();
   expect(runningCell?.querySelector(".step-badge")?.textContent).toBe("Run");
-  expect(runningCell?.querySelector(".step-value")?.textContent).toBe("#123456");
+  expect(runningCell?.querySelector(".step-value")?.textContent).toBe(
+    "#123456",
+  );
 });
 
 test("renderDashboard renders pending step with correct badge and status class", () => {
@@ -102,7 +126,9 @@ test("renderDashboard escapes HTML in commit message", () => {
   const pkg = makePkg({ message: "<script>alert('xss')</script>" });
   const doc = parse(renderDashboard([pkg], cfg, new Date()));
   // The msg element's textContent should be the literal string, not executed HTML
-  expect(doc.querySelector(".msg")?.textContent).toBe("<script>alert('xss')</script>");
+  expect(doc.querySelector(".msg")?.textContent).toBe(
+    "<script>alert('xss')</script>",
+  );
   // No actual script element should exist in the DOM
   expect(doc.querySelector("script[src]")).toBeNull();
 });
@@ -110,7 +136,13 @@ test("renderDashboard escapes HTML in commit message", () => {
 test("renderDashboard escapes HTML in step tooltip", () => {
   const pkg = makePkg({
     steps: [
-      { stepId: "ci", status: "running", label: "run", updatedAt: new Date().toISOString(), detail: "<b>dangerous</b>" },
+      {
+        stepId: "ci",
+        status: "running",
+        label: "run",
+        updatedAt: new Date().toISOString(),
+        detail: "<b>dangerous</b>",
+      },
     ],
   });
   const doc = parse(renderDashboard([pkg], cfg, new Date()));
@@ -129,7 +161,9 @@ test("renderPackageDetail sets page title with commit hash and pipeline name", (
 
 test("renderPackageDetail breadcrumb contains links to landing page and pipeline", () => {
   const doc = parse(renderPackageDetail(makePkg(), cfg, []));
-  const links = Array.from(doc.querySelectorAll("h1 a")).map(a => a.getAttribute("href"));
+  const links = Array.from(doc.querySelectorAll("h1 a")).map((a) =>
+    a.getAttribute("href"),
+  );
   expect(links).toContain("/");
   expect(links).toContain("/pipeline/test-pipeline");
 });
@@ -149,13 +183,31 @@ test("renderPackageDetail renders a section for each non-git step", () => {
 
 test("renderPackageDetail renders history rows inside the history table", () => {
   const history = [
-    { step_id: "ci", status: "running", label: "#123", detail: "in progress", recorded_at: "2025-01-01T10:00:00Z" },
-    { step_id: "ci", status: "passed",  label: "#123", detail: "done",        recorded_at: "2025-01-01T10:05:00Z" },
+    {
+      id: 1,
+      package_id: "test-pipeline:abc1234abc1234abc1234abc1234abc1234abc123",
+      step_id: "ci",
+      status: "running",
+      label: "#123",
+      detail: "in progress",
+      recorded_at: "2025-01-01T10:00:00Z",
+    },
+    {
+      id: 2,
+      package_id: "test-pipeline:abc1234abc1234abc1234abc1234abc1234abc123",
+      step_id: "ci",
+      status: "passed",
+      label: "#123",
+      detail: "done",
+      recorded_at: "2025-01-01T10:05:00Z",
+    },
   ];
   const doc = parse(renderPackageDetail(makePkg(), cfg, history));
   const rows = Array.from(doc.querySelectorAll(".hist-table tbody tr"));
   expect(rows.length).toBe(2);
-  const cellTexts = rows.map(r => Array.from(r.querySelectorAll("td")).map(td => td.textContent));
+  const cellTexts = rows.map((r) =>
+    Array.from(r.querySelectorAll("td")).map((td) => td.textContent),
+  );
   expect(cellTexts[0]).toContain("running");
   expect(cellTexts[0]).toContain("in progress");
   expect(cellTexts[1]).toContain("passed");

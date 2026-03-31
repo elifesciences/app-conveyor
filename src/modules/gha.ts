@@ -1,13 +1,23 @@
 /**
  * GHA Tracker — finds the workflow run triggered by a commit_hash.
  */
-import type { StepConfig, StepState, StepStatus } from "../types";
 import { ghFetch } from "../github";
-import { now } from "../util";
+import type { StepConfig, StepState, StepStatus } from "../types";
+import { errorMessage, now } from "../util";
+
+interface GhaRun {
+  id: number;
+  status: string;
+  conclusion: string | null;
+}
+
+interface GhaRunsResponse {
+  workflow_runs?: GhaRun[];
+}
 
 export async function syncGha(
   cfg: StepConfig,
-  commitHash: string
+  commitHash: string,
 ): Promise<StepState> {
   const base: Omit<StepState, "status" | "label" | "detail" | "ghaRunId"> = {
     stepId: cfg.id,
@@ -16,16 +26,26 @@ export async function syncGha(
   };
 
   if (!cfg.repo || !cfg.workflow) {
-    return { ...base, status: "skipped", label: "–", detail: "workflow not configured" };
+    return {
+      ...base,
+      status: "skipped",
+      label: "–",
+      detail: "workflow not configured",
+    };
   }
 
   try {
-    const data = await ghFetch(
-      `/repos/${cfg.repo}/actions/workflows/${cfg.workflow}/runs?head_sha=${commitHash}&per_page=1`
-    );
+    const data = (await ghFetch(
+      `/repos/${cfg.repo}/actions/workflows/${cfg.workflow}/runs?head_sha=${commitHash}&per_page=1`,
+    )) as GhaRunsResponse;
     const run = data?.workflow_runs?.[0];
     if (!run) {
-      return { ...base, status: "pending", label: "waiting", detail: "no run found yet" };
+      return {
+        ...base,
+        status: "pending",
+        label: "waiting",
+        detail: "no run found yet",
+      };
     }
 
     const runId = String(run.id);
@@ -34,7 +54,8 @@ export async function syncGha(
 
     let status: StepStatus;
     if (conclusion === "success") status = "passed";
-    else if (conclusion === "failure" || conclusion === "cancelled") status = "failed";
+    else if (conclusion === "failure" || conclusion === "cancelled")
+      status = "failed";
     else if (runStatus === "in_progress") status = "running";
     else status = "pending";
 
@@ -45,7 +66,7 @@ export async function syncGha(
       detail: `Run ${runId} — ${runStatus}${conclusion ? ` / ${conclusion}` : ""}`,
       ghaRunId: runId,
     };
-  } catch (e: any) {
-    return { ...base, status: "failed", label: "err", detail: String(e?.message ?? e) };
+  } catch (e: unknown) {
+    return { ...base, status: "failed", label: "err", detail: errorMessage(e) };
   }
 }

@@ -8,13 +8,32 @@
  * searching its title and head branch name.
  */
 import type { StepConfig, StepState } from "../types";
-import { now } from "../util";
+import { errorMessage, now } from "../util";
 
 const GITHUB_API = "https://api.github.com";
 
+interface GhPr {
+  number: number;
+  title: string;
+  state: string;
+  merged_at: string | null;
+  head: { ref: string; sha: string };
+  user?: { login: string };
+}
+
+interface CheckRun {
+  name: string;
+  status: string;
+  conclusion: string | null;
+}
+
+interface CheckRunsResponse {
+  check_runs?: CheckRun[];
+}
+
 export async function syncGhPr(
   cfg: StepConfig,
-  imageTag: string
+  imageTag: string,
 ): Promise<StepState> {
   const base: Omit<StepState, "status" | "label" | "detail"> = {
     stepId: cfg.id,
@@ -23,16 +42,31 @@ export async function syncGhPr(
   };
 
   if (!cfg.repo) {
-    return { ...base, status: "skipped", label: "–", detail: "repo not configured" };
+    return {
+      ...base,
+      status: "skipped",
+      label: "–",
+      detail: "repo not configured",
+    };
   }
 
   if (!imageTag) {
-    return { ...base, status: "pending", label: "waiting", detail: "waiting for image tag from registry step" };
+    return {
+      ...base,
+      status: "pending",
+      label: "waiting",
+      detail: "waiting for image tag from registry step",
+    };
   }
 
   const shortHash = extractShortHash(imageTag);
   if (!shortHash) {
-    return { ...base, status: "pending", label: "waiting", detail: `could not extract hash from tag: ${imageTag}` };
+    return {
+      ...base,
+      status: "pending",
+      label: "waiting",
+      detail: `could not extract hash from tag: ${imageTag}`,
+    };
   }
 
   const pat = process.env.GITHUB_TOKEN;
@@ -40,25 +74,27 @@ export async function syncGhPr(
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
   };
-  if (pat) headers["Authorization"] = `Bearer ${pat}`;
+  if (pat) headers.Authorization = `Bearer ${pat}`;
 
   try {
     // Fetch recent PRs (open + closed) and find one matching our hash
     const url = `${GITHUB_API}/repos/${cfg.repo}/pulls?state=all&per_page=50&sort=created&direction=desc`;
     const res = await fetch(url, { headers });
     if (!res.ok) {
-      return { ...base, status: "failed", label: "err", detail: `GitHub API ${res.status} for ${url}` };
+      return {
+        ...base,
+        status: "failed",
+        label: "err",
+        detail: `GitHub API ${res.status} for ${url}`,
+      };
     }
 
-    const prs: any[] = await res.json();
+    const prs = (await res.json()) as GhPr[];
     const authorFilter = cfg.author;
 
-    const pr = prs.find(p => {
+    const pr = prs.find((p) => {
       if (authorFilter && p.user?.login !== authorFilter) return false;
-      return (
-        (p.title as string).includes(shortHash) ||
-        (p.head?.ref as string).includes(shortHash)
-      );
+      return p.title.includes(shortHash) || p.head?.ref.includes(shortHash);
     });
 
     if (!pr) {
@@ -106,18 +142,20 @@ export async function syncGhPr(
       };
     }
 
-    const checksData: any = await checksRes.json();
-    const runs: any[] = checksData.check_runs ?? [];
+    const checksData = (await checksRes.json()) as CheckRunsResponse;
+    const runs: CheckRun[] = checksData.check_runs ?? [];
 
-    const failed = runs.filter(r => r.conclusion === "failure" || r.conclusion === "cancelled");
-    const pending = runs.filter(r => r.status !== "completed");
+    const failed = runs.filter(
+      (r) => r.conclusion === "failure" || r.conclusion === "cancelled",
+    );
+    const pending = runs.filter((r) => r.status !== "completed");
 
     if (failed.length > 0) {
       return {
         ...base,
         status: "failed",
         label: prLabel,
-        detail: `PR ${prLabel} | ${failed.length} check(s) failed: ${failed.map((r: any) => r.name).join(", ")}`,
+        detail: `PR ${prLabel} | ${failed.length} check(s) failed: ${failed.map((r) => r.name).join(", ")}`,
       };
     }
 
@@ -127,8 +165,8 @@ export async function syncGhPr(
       label: prLabel,
       detail: `PR ${prLabel} open | ${pending.length} check(s) pending | ${pr.title}`,
     };
-  } catch (e: any) {
-    return { ...base, status: "failed", label: "err", detail: String(e?.message ?? e) };
+  } catch (e: unknown) {
+    return { ...base, status: "failed", label: "err", detail: errorMessage(e) };
   }
 }
 

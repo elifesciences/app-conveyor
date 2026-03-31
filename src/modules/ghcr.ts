@@ -7,13 +7,27 @@
  *      Efficient for timestamp-based tag formats like {branch}-{hash}-{timestamp}.
  *   3. OCI /tags/list fallback (lexicographic order, slower for large registries)
  */
-import type { StepConfig, StepState } from "../types";
+
 import { ghFetch } from "../github";
-import { now } from "../util";
+import type { StepConfig, StepState } from "../types";
+import { errorMessage, now } from "../util";
+
+interface GhcrVersion {
+  metadata?: {
+    container?: {
+      tags?: string[];
+    };
+  };
+}
+
+interface GhcrTokenResponse {
+  token?: string;
+  access_token?: string;
+}
 
 export async function syncGhcr(
   cfg: StepConfig,
-  commitHash: string
+  commitHash: string,
 ): Promise<StepState> {
   const base: Omit<StepState, "status" | "label" | "detail"> = {
     stepId: cfg.id,
@@ -22,7 +36,12 @@ export async function syncGhcr(
   };
 
   if (!cfg.image) {
-    return { ...base, status: "skipped", label: "–", detail: "image not configured" };
+    return {
+      ...base,
+      status: "skipped",
+      label: "–",
+      detail: "image not configured",
+    };
   }
 
   const withoutRegistry = cfg.image.replace(/^ghcr\.io\//, "");
@@ -32,12 +51,21 @@ export async function syncGhcr(
     const bearerToken = await getGhcrToken(withoutRegistry);
 
     // ── 1. Fast path: probe exact tag ──────────────────────────────────────
-    const exactResult = await probeManifest(withoutRegistry, shortHash, bearerToken);
+    const exactResult = await probeManifest(
+      withoutRegistry,
+      shortHash,
+      bearerToken,
+    );
     if (exactResult.ok) {
       return buildPassed(base, cfg.image, shortHash, exactResult.digest);
     }
     if (exactResult.status !== 404) {
-      return { ...base, status: "failed", label: "err", detail: `registry ${exactResult.status}` };
+      return {
+        ...base,
+        status: "failed",
+        label: "err",
+        detail: `registry ${exactResult.status}`,
+      };
     }
 
     // ── 2. GitHub Packages API (newest-first, efficient) ───────────────────
@@ -45,7 +73,12 @@ export async function syncGhcr(
     if (ghTag) {
       const result = await probeManifest(withoutRegistry, ghTag, bearerToken);
       if (!result.ok) {
-        return { ...base, status: "failed", label: "err", detail: `registry ${result.status} for ${ghTag}` };
+        return {
+          ...base,
+          status: "failed",
+          label: "err",
+          detail: `registry ${result.status} for ${ghTag}`,
+        };
       }
       return buildPassed(base, cfg.image, ghTag, result.digest);
     }
@@ -55,15 +88,29 @@ export async function syncGhcr(
     if (ociTag) {
       const result = await probeManifest(withoutRegistry, ociTag, bearerToken);
       if (!result.ok) {
-        return { ...base, status: "failed", label: "err", detail: `registry ${result.status} for ${ociTag}` };
+        return {
+          ...base,
+          status: "failed",
+          label: "err",
+          detail: `registry ${result.status} for ${ociTag}`,
+        };
       }
       return buildPassed(base, cfg.image, ociTag, result.digest);
     }
 
-    return { ...base, status: "pending", label: "waiting", detail: `no tag containing ${shortHash}` };
-
-  } catch (e: any) {
-    return { ...base, status: "failed", label: "err", detail: String(e?.message ?? e) };
+    return {
+      ...base,
+      status: "pending",
+      label: "waiting",
+      detail: `no tag containing ${shortHash}`,
+    };
+  } catch (e: unknown) {
+    return {
+      ...base,
+      status: "failed",
+      label: "err",
+      detail: errorMessage(e),
+    };
   }
 }
 
@@ -74,8 +121,8 @@ export async function syncGhcr(
  * one whose tags contain the short hash. Works for both org and user packages.
  */
 async function findTagViaGithubApi(
-  repo: string,   // e.g. "elifesciences/enhanced-preprints-client"
-  shortHash: string
+  repo: string, // e.g. "elifesciences/enhanced-preprints-client"
+  shortHash: string,
 ): Promise<string | null> {
   const slashIdx = repo.indexOf("/");
   if (slashIdx === -1) return null;
@@ -92,21 +139,25 @@ async function findTagViaGithubApi(
 
   for (const endpoint of endpoints) {
     try {
-      const versions = await ghFetch(endpoint) as any[];
+      const versions = (await ghFetch(endpoint)) as GhcrVersion[];
       if (!Array.isArray(versions)) continue;
 
-      console.log(`[ghcr] GitHub Packages API returned ${versions.length} versions for ${repo}`);
+      console.log(
+        `[ghcr] GitHub Packages API returned ${versions.length} versions for ${repo}`,
+      );
 
       for (const version of versions) {
         const tags: string[] = version?.metadata?.container?.tags ?? [];
-        const match = tags.find(t => tagContainsHash(t, shortHash));
+        const match = tags.find((t) => tagContainsHash(t, shortHash));
         if (match) return match;
       }
 
       // Got a valid response but no match in first 100 versions — stop here
       return null;
-    } catch (e: any) {
-      console.warn(`[ghcr] GitHub Packages API failed for ${endpoint}: ${e?.message ?? e}`);
+    } catch (e: unknown) {
+      console.warn(
+        `[ghcr] GitHub Packages API failed for ${endpoint}: ${errorMessage(e)}`,
+      );
     }
   }
 
@@ -119,7 +170,7 @@ async function findTagViaOci(
   repo: string,
   shortHash: string,
   bearerToken: string,
-  maxTags = 1000
+  maxTags = 1000,
 ): Promise<string | null> {
   let url: string | null = `https://ghcr.io/v2/${repo}/tags/list?n=100`;
 
@@ -132,10 +183,10 @@ async function findTagViaOci(
       break;
     }
 
-    const json = await resp.json() as { tags?: string[] };
+    const json = (await resp.json()) as { tags?: string[] };
     const tags = json.tags ?? [];
 
-    const match = tags.find(t => tagContainsHash(t, shortHash));
+    const match = tags.find((t) => tagContainsHash(t, shortHash));
     if (match) return match;
 
     maxTags -= tags.length;
@@ -160,25 +211,26 @@ async function getGhcrToken(repo: string): Promise<string> {
   const headers: Record<string, string> = {};
   if (pat) {
     // username can be anything; password is the PAT
-    headers["Authorization"] = `Basic ${btoa(`x-token:${pat}`)}`;
+    headers.Authorization = `Basic ${btoa(`x-token:${pat}`)}`;
   }
   const resp = await fetch(
     `https://ghcr.io/token?scope=repository:${repo}:pull,list&service=ghcr.io`,
-    { headers }
+    { headers },
   );
-  const json = await resp.json() as any;
+  const json = (await resp.json()) as GhcrTokenResponse;
   return json.token ?? json.access_token ?? "";
 }
 
 async function probeManifest(
   repo: string,
   tag: string,
-  bearerToken: string
+  bearerToken: string,
 ): Promise<{ ok: boolean; status: number; digest: string }> {
   const resp = await fetch(`https://ghcr.io/v2/${repo}/manifests/${tag}`, {
     headers: {
       Authorization: `Bearer ${bearerToken}`,
-      Accept: "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json",
+      Accept:
+        "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json",
     },
   });
   return {
@@ -194,7 +246,7 @@ async function probeManifest(
  */
 export function tagContainsHash(tag: string, hash: string): boolean {
   if (tag === hash) return true;
-  return tag.split("-").some(part => part.startsWith(hash));
+  return tag.split("-").some((part) => part.startsWith(hash));
 }
 
 function parseNextLink(link: string | null): string | null {
@@ -213,9 +265,11 @@ function buildPassed(
   base: Omit<StepState, "status" | "label" | "detail">,
   image: string,
   tag: string,
-  digest: string
+  digest: string,
 ): StepState {
-  const shortDigest = digest.startsWith("sha256:") ? digest.slice(7, 19) : digest.slice(0, 12);
+  const shortDigest = digest.startsWith("sha256:")
+    ? digest.slice(7, 19)
+    : digest.slice(0, 12);
   return {
     ...base,
     status: "passed",

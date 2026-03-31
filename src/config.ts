@@ -5,7 +5,7 @@ export async function loadConfig(): Promise<AppConfig> {
   const configPath = process.env.CONFIG_PATH ?? "conveyor.yaml";
   const file = Bun.file(configPath);
 
-  if (!await file.exists()) {
+  if (!(await file.exists())) {
     console.error(`[config] Config file not found: ${configPath}`);
     console.error(`[config] Create conveyor.yaml or set CONFIG_PATH`);
     process.exit(1);
@@ -30,6 +30,8 @@ export async function loadConfig(): Promise<AppConfig> {
     }
   }
 
-  console.log(`[config] Loaded ${cfg.pipelines.length} pipeline(s) from ${configPath}`);
+  console.log(
+    `[config] Loaded ${cfg.pipelines.length} pipeline(s) from ${configPath}`,
+  );
   return cfg;
 }

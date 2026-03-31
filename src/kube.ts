@@ -1,5 +1,5 @@
-import * as k8s from "@kubernetes/client-node";
 import { writeFileSync } from "node:fs";
+import * as k8s from "@kubernetes/client-node";
 
 let _kc: k8s.KubeConfig | null = null;
 
@@ -19,12 +19,17 @@ function getKubeConfig(): k8s.KubeConfig {
 function warnIfCaMissing(kc: k8s.KubeConfig): void {
   if (process.env.NODE_EXTRA_CA_CERTS) return;
 
-  const cluster = kc.getCurrentCluster();
-  const caData: string | undefined = (cluster as any)?.caData;
-  const caFile: string | undefined = (cluster as any)?.caFile;
+  const cluster = kc.getCurrentCluster() as {
+    caData?: string;
+    caFile?: string;
+  } | null;
+  const caData: string | undefined = cluster?.caData;
+  const caFile: string | undefined = cluster?.caFile;
 
   if (caFile) {
-    console.warn(`[kube] NODE_EXTRA_CA_CERTS not set. Add to .env:\n  NODE_EXTRA_CA_CERTS=${caFile}`);
+    console.warn(
+      `[kube] NODE_EXTRA_CA_CERTS not set. Add to .env:\n  NODE_EXTRA_CA_CERTS=${caFile}`,
+    );
     return;
   }
 
@@ -35,11 +40,13 @@ function warnIfCaMissing(kc: k8s.KubeConfig): void {
       writeFileSync(outPath, pem, { mode: 0o600 });
       console.warn(
         `[kube] NODE_EXTRA_CA_CERTS not set — TLS will fail.\n` +
-        `  CA cert written to ${outPath}. Add to .env:\n` +
-        `  NODE_EXTRA_CA_CERTS=${outPath}`
+          `  CA cert written to ${outPath}. Add to .env:\n` +
+          `  NODE_EXTRA_CA_CERTS=${outPath}`,
       );
     } catch {
-      console.warn(`[kube] NODE_EXTRA_CA_CERTS not set and could not write CA to disk.`);
+      console.warn(
+        `[kube] NODE_EXTRA_CA_CERTS not set and could not write CA to disk.`,
+      );
     }
   }
 }

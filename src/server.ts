@@ -1,15 +1,18 @@
-import type { AppConfig, PipelineConfig } from "./types";
-import { listPackages, findPackageByCommitPrefix, getStepHistory } from "./db";
-import { renderLandingPage, renderDashboard, renderPackageDetail } from "./render";
-import { now } from "./util";
+import { findPackageByCommitPrefix, getStepHistory, listPackages } from "./db";
+import {
+  renderDashboard,
+  renderLandingPage,
+  renderPackageDetail,
+} from "./render";
+import type { AppConfig, PipelineConfig, StepHistoryEntry } from "./types";
 
 export function createServer(
   cfg: AppConfig,
-  pollers: Map<string, () => Promise<void>>
+  pollers: Map<string, () => Promise<void>>,
 ) {
   const port = Number(process.env.PORT ?? 3000);
   const pipelineMap = new Map<string, PipelineConfig>(
-    cfg.pipelines.map(p => [p.id, p])
+    cfg.pipelines.map((p) => [p.id, p]),
   );
 
   const server = Bun.serve({
@@ -20,7 +23,7 @@ export function createServer(
 
       // GET / — landing page
       if (path === "/" || path === "") {
-        const pipelineSummaries = cfg.pipelines.map(pipeline => {
+        const pipelineSummaries = cfg.pipelines.map((pipeline) => {
           const latest = listPackages(pipeline.id, 1)[0] ?? null;
           return { pipeline, latest };
         });
@@ -32,20 +35,25 @@ export function createServer(
 
       // POST /pipeline/:pipelineId/sync — trigger poll, redirect to dashboard
       const syncMatch = path.match(/^\/pipeline\/([^/]+)\/sync$/);
-      if (syncMatch && syncMatch[1] && req.method === "POST") {
+      if (syncMatch?.[1] && req.method === "POST") {
         const pipelineId = syncMatch[1];
         const trigger = pollers.get(pipelineId);
-        if (!trigger) return new Response("Pipeline not found", { status: 404 });
+        if (!trigger)
+          return new Response("Pipeline not found", { status: 404 });
         await trigger();
-        return new Response(null, { status: 303, headers: { Location: `/pipeline/${pipelineId}` } });
+        return new Response(null, {
+          status: 303,
+          headers: { Location: `/pipeline/${pipelineId}` },
+        });
       }
 
       // GET /pipeline/:pipelineId — pipeline dashboard
       const dashMatch = path.match(/^\/pipeline\/([^/]+)$/);
-      if (dashMatch && dashMatch[1] && req.method === "GET") {
+      if (dashMatch?.[1] && req.method === "GET") {
         const pipelineId = dashMatch[1];
         const pipeline = pipelineMap.get(pipelineId);
-        if (!pipeline) return new Response("Pipeline not found", { status: 404 });
+        if (!pipeline)
+          return new Response("Pipeline not found", { status: 404 });
         const packages = listPackages(pipelineId, 50);
         const html = renderDashboard(packages, pipeline, new Date());
         return new Response(html, {
@@ -54,14 +62,17 @@ export function createServer(
       }
 
       // GET /pipeline/:pipelineId/package/:commitId — package detail
-      const detailMatch = path.match(/^\/pipeline\/([^/]+)\/package\/([a-f0-9]{7,40})$/);
-      if (detailMatch && detailMatch[1] && detailMatch[2] && req.method === "GET") {
+      const detailMatch = path.match(
+        /^\/pipeline\/([^/]+)\/package\/([a-f0-9]{7,40})$/,
+      );
+      if (detailMatch?.[1] && detailMatch[2] && req.method === "GET") {
         const pipelineId = detailMatch[1];
         const pipeline = pipelineMap.get(pipelineId);
-        if (!pipeline) return new Response("Pipeline not found", { status: 404 });
+        if (!pipeline)
+          return new Response("Pipeline not found", { status: 404 });
         const pkg = findPackageByCommitPrefix(pipelineId, detailMatch[2]);
         if (!pkg) return new Response("Package not found", { status: 404 });
-        const history: any[] = [];
+        const history: StepHistoryEntry[] = [];
         for (const step of pkg.steps) {
           history.push(...getStepHistory(pkg.id, step.stepId));
         }
@@ -75,7 +86,10 @@ export function createServer(
       if (path === "/api/packages" && req.method === "GET") {
         const pipelineId = url.searchParams.get("pipeline");
         if (!pipelineId) {
-          return Response.json({ error: "pipeline query param required" }, { status: 400 });
+          return Response.json(
+            { error: "pipeline query param required" },
+            { status: 400 },
+          );
         }
         return Response.json(listPackages(pipelineId, 50));
       }
