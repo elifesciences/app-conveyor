@@ -115,13 +115,24 @@ export class Engine {
 
   private async advancePackage(pkg: Package) {
     const stepMap = new Map(pkg.steps.map((s) => [s.stepId, s]));
-    const upstream = this.gatherUpstream(pkg.steps);
+    const upstream = this.gatherUpstream(
+      pkg.steps.filter((s) => s.status === "passed"),
+    );
 
     for (const stepCfg of this.cfg.steps) {
       if (stepCfg.type === "git") continue;
 
       const current = stepMap.get(stepCfg.id);
-      if (current?.status === "passed") continue;
+      if (current?.status === "passed") {
+        // propagate this step's outputs for downstream steps
+        const s = current;
+        if (s.commitHash) upstream.commitHash = s.commitHash;
+        if (s.ghaRunId) upstream.ghaRunId = s.ghaRunId;
+        if (s.imageDigest) upstream.imageDigest = s.imageDigest;
+        if (s.imageTag) upstream.imageTag = s.imageTag;
+        if (s.syncRevision) upstream.syncRevision = s.syncRevision;
+        continue;
+      }
 
       let newState: StepState;
       try {
