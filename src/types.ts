@@ -19,6 +19,7 @@ export interface StepConfig {
   workflow?: string;
   // ghcr
   image?: string;
+  tagPattern?: string; // optional regex; if set, matched tags must also satisfy it
   // gh-pr
   author?: string; // filter PRs by author, e.g. "renovate[bot]"
   // flux-image

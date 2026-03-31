@@ -49,27 +49,34 @@ export async function syncGhcr(
 
   try {
     const bearerToken = await getGhcrToken(withoutRegistry);
+    const tagPattern = cfg.tagPattern ? new RegExp(cfg.tagPattern) : undefined;
 
-    // ── 1. Fast path: probe exact tag ──────────────────────────────────────
-    const exactResult = await probeManifest(
-      withoutRegistry,
-      shortHash,
-      bearerToken,
-    );
-    if (exactResult.ok) {
-      return buildPassed(base, cfg.image, shortHash, exactResult.digest);
-    }
-    if (exactResult.status !== 404) {
-      return {
-        ...base,
-        status: "failed",
-        label: "err",
-        detail: `registry ${exactResult.status}`,
-      };
+    // ── 1. Fast path: probe exact tag (skip if tagPattern set) ────────────
+    if (!tagPattern) {
+      const exactResult = await probeManifest(
+        withoutRegistry,
+        shortHash,
+        bearerToken,
+      );
+      if (exactResult.ok) {
+        return buildPassed(base, cfg.image, shortHash, exactResult.digest);
+      }
+      if (exactResult.status !== 404) {
+        return {
+          ...base,
+          status: "failed",
+          label: "err",
+          detail: `registry ${exactResult.status}`,
+        };
+      }
     }
 
     // ── 2. GitHub Packages API (newest-first, efficient) ───────────────────
-    const ghTag = await findTagViaGithubApi(withoutRegistry, shortHash);
+    const ghTag = await findTagViaGithubApi(
+      withoutRegistry,
+      shortHash,
+      tagPattern,
+    );
     if (ghTag) {
       const result = await probeManifest(withoutRegistry, ghTag, bearerToken);
       if (!result.ok) {
@@ -84,7 +91,12 @@ export async function syncGhcr(
     }
 
     // ── 3. OCI tags/list fallback ──────────────────────────────────────────
-    const ociTag = await findTagViaOci(withoutRegistry, shortHash, bearerToken);
+    const ociTag = await findTagViaOci(
+      withoutRegistry,
+      shortHash,
+      bearerToken,
+      tagPattern,
+    );
     if (ociTag) {
       const result = await probeManifest(withoutRegistry, ociTag, bearerToken);
       if (!result.ok) {
@@ -123,6 +135,7 @@ export async function syncGhcr(
 async function findTagViaGithubApi(
   repo: string, // e.g. "elifesciences/enhanced-preprints-client"
   shortHash: string,
+  tagPattern?: RegExp,
 ): Promise<string | null> {
   const slashIdx = repo.indexOf("/");
   if (slashIdx === -1) return null;
@@ -148,7 +161,7 @@ async function findTagViaGithubApi(
 
       for (const version of versions) {
         const tags: string[] = version?.metadata?.container?.tags ?? [];
-        const match = tags.find((t) => tagContainsHash(t, shortHash));
+        const match = tags.find((t) => tagMatches(t, shortHash, tagPattern));
         if (match) return match;
       }
 
@@ -170,6 +183,7 @@ async function findTagViaOci(
   repo: string,
   shortHash: string,
   bearerToken: string,
+  tagPattern?: RegExp,
   maxTags = 1000,
 ): Promise<string | null> {
   let url: string | null = `https://ghcr.io/v2/${repo}/tags/list?n=100`;
@@ -186,7 +200,7 @@ async function findTagViaOci(
     const json = (await resp.json()) as { tags?: string[] };
     const tags = json.tags ?? [];
 
-    const match = tags.find((t) => tagContainsHash(t, shortHash));
+    const match = tags.find((t) => tagMatches(t, shortHash, tagPattern));
     if (match) return match;
 
     maxTags -= tags.length;
@@ -247,6 +261,12 @@ async function probeManifest(
 export function tagContainsHash(tag: string, hash: string): boolean {
   if (tag === hash) return true;
   return tag.split("-").some((part) => part.startsWith(hash));
+}
+
+function tagMatches(tag: string, hash: string, tagPattern?: RegExp): boolean {
+  if (!tagContainsHash(tag, hash)) return false;
+  if (tagPattern && !tagPattern.test(tag)) return false;
+  return true;
 }
 
 function parseNextLink(link: string | null): string | null {

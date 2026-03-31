@@ -44,7 +44,9 @@ function makeBunHttpLibrary() {
 
       return new ResponseContext(
         response.status,
-        Object.fromEntries(Array.from(response.headers as unknown as Iterable<[string, string]>)),
+        Object.fromEntries(
+          Array.from(response.headers as unknown as Iterable<[string, string]>),
+        ),
         {
           text: () => response.text(),
           binary: async () => Buffer.from(await response.arrayBuffer()),
