@@ -1,5 +1,5 @@
 {
-  "name": "artifact-conveyor",
+  "name": "app-conveyor",
   "module": "index.ts",
   "type": "module",
   "private": true,
