@@ -8,11 +8,11 @@
  *      so a stale push from a previous deploy doesn't cause a false pass.
  *   3. Pass: Kustomization is Ready AND lastAppliedRevision contains lastPushCommit.
  *
- * We intentionally do NOT use the Ready condition's lastTransitionTime. That
- * timestamp only moves when the condition changes value (True↔False), so a
- * Kustomization that reconciles while staying continuously Ready would never
- * update it — and one that happened to transition just before the automation
- * pushed would give a false pass.
+ * lastTransitionTime is used as a fallback when exact commit match fails: if
+ * the kustomization transitioned to Ready after the push time, a concurrent
+ * GitOps commit has superseded the push and the change is included. Note this
+ * fallback does not help for kustomizations that stay continuously Ready across
+ * reconciliations — exact commit match remains the reliable path for those.
  *
  * Without automation configured, falls back to the imageTag timestamp heuristic.
  */
@@ -142,11 +142,20 @@ export async function syncFluxKustomize(
         };
       }
 
-      // Pass: Kustomization is Ready and has applied the exact commit the automation pushed.
+      // Pass if the kustomization has applied the exact push commit, OR if it
+      // has reconciled to a newer commit that supersedes it. The latter happens
+      // when multiple pipelines share a GitOps repo: Flux reconciles to the
+      // latest HEAD rather than the specific commit the automation pushed.
+      // We detect this by checking if the kustomization transitioned to Ready
+      // after the push was made.
       const pushApplied = lastAppliedRevision.includes(lastPushCommit);
+      const reconciledAfterPush =
+        !!readyCondition?.lastTransitionTime &&
+        new Date(readyCondition.lastTransitionTime) >= lastPushTime;
+      const pushSatisfied = pushApplied || reconciledAfterPush;
 
       let status: StepState["status"];
-      if (readyStatus === "True" && pushApplied) status = "passed";
+      if (readyStatus === "True" && pushSatisfied) status = "passed";
       else if (readyStatus === "False") status = "failed";
       else status = "running";
 
@@ -159,7 +168,9 @@ export async function syncFluxKustomize(
           `push: ${lastPushCommit.slice(0, 7)}`,
           pushApplied
             ? "push applied ✓"
-            : "waiting for kustomization to apply push commit",
+            : reconciledAfterPush
+              ? "reconciled after push ✓"
+              : "waiting for kustomization to apply push commit",
           message,
         ]
           .filter(Boolean)
