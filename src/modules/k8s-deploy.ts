@@ -65,10 +65,15 @@ export async function syncK8sDeploy(
       resource.spec?.template?.spec?.containers?.map((c) => c.image ?? "") ??
       [];
 
+    // imageTag may be a full 40-char SHA while the spec image reference embeds
+    // only the short 7-char prefix (e.g. "gab12d92" in a trunkver tag), so
+    // also check the short prefix.
+    const shortHash = imageTag ? imageTag.slice(0, 7) : "";
     const imageMatches = (img: string) =>
       img.includes(imageDigest) ||
       img.endsWith(`@${imageDigest}`) ||
-      (imageTag ? img.includes(imageTag) : false);
+      (imageTag ? img.includes(imageTag) : false) ||
+      (shortHash ? img.includes(shortHash) : false);
 
     const imageConfirmed = specImages.some(imageMatches);
 
