@@ -9,6 +9,7 @@ import type { AppConfig, PipelineConfig, StepHistoryEntry } from "./types";
 export function createServer(
   cfg: AppConfig,
   pollers: Map<string, () => Promise<void>>,
+  packagePollers: Map<string, (commitPrefix: string) => Promise<void>>,
 ) {
   const port = Number(process.env.PORT ?? 3000);
   const pipelineMap = new Map<string, PipelineConfig>(
@@ -47,6 +48,29 @@ export function createServer(
         return new Response(null, {
           status: 303,
           headers: { Location: redirect },
+        });
+      }
+
+      // POST /pipeline/:pipelineId/package/:commitId/sync — trigger single-package poll
+      const packageSyncMatch = path.match(
+        /^\/pipeline\/([^/]+)\/package\/([a-f0-9]{7,40})\/sync$/,
+      );
+      if (
+        packageSyncMatch?.[1] &&
+        packageSyncMatch[2] &&
+        req.method === "POST"
+      ) {
+        const pipelineId = packageSyncMatch[1];
+        const commitPrefix = packageSyncMatch[2];
+        const trigger = packagePollers.get(pipelineId);
+        if (!trigger)
+          return new Response("Pipeline not found", { status: 404 });
+        await trigger(commitPrefix);
+        return new Response(null, {
+          status: 303,
+          headers: {
+            Location: `/pipeline/${pipelineId}/package/${commitPrefix}`,
+          },
         });
       }
 

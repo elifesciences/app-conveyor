@@ -2,7 +2,13 @@
  * Core polling engine. Iterates all pipeline steps for each active Package.
  */
 
-import { getPackage, listPackages, upsertPackage, upsertStepState } from "./db";
+import {
+  findPackageByCommitPrefix,
+  getPackage,
+  listPackages,
+  upsertPackage,
+  upsertStepState,
+} from "./db";
 import { syncFluxImage } from "./modules/flux-image";
 import { syncFluxKustomize } from "./modules/flux-kustomize";
 import { syncGhPr } from "./modules/gh-pr";
@@ -39,6 +45,20 @@ export class Engine {
     console.log(`[engine:${this.cfg.id}] poll at ${new Date().toISOString()}`);
     await this.discoverNewCommits();
     await this.advancePackages();
+  }
+
+  async pollPackage(commitPrefix: string) {
+    const pkg = findPackageByCommitPrefix(this.cfg.id, commitPrefix);
+    if (!pkg) {
+      console.warn(
+        `[engine:${this.cfg.id}] pollPackage: no package matching ${commitPrefix}`,
+      );
+      return;
+    }
+    console.log(
+      `[engine:${this.cfg.id}] pollPackage ${pkg.commitHash.slice(0, 7)} at ${new Date().toISOString()}`,
+    );
+    await this.advancePackage(pkg);
   }
 
   // ─── Step 1: discover new commits from Git step ──────────────────────────
@@ -113,7 +133,7 @@ export class Engine {
     }
   }
 
-  private async advancePackage(pkg: Package) {
+  async advancePackage(pkg: Package) {
     const stepMap = new Map(pkg.steps.map((s) => [s.stepId, s]));
     const upstream = this.gatherUpstream(
       pkg.steps.filter((s) => s.status === "passed"),

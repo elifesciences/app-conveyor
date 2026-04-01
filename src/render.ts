@@ -567,8 +567,7 @@ export function renderPackageDetail(
       <span style="color:var(--muted);font-weight:400"> / </span>
       <a class="breadcrumb" href="https://github.com/${escHtml(pkg.repoFullName)}/commit/${pkg.commitHash}" target="_blank" rel="noopener">${pkg.commitHash.slice(0, 7)}</a>
     </h1>
-    <form method="POST" action="/pipeline/${escHtml(pipeline.id)}/sync" style="margin:0">
-      <input type="hidden" name="redirect" value="/pipeline/${escHtml(pipeline.id)}/package/${escHtml(pkg.commitHash.slice(0, 7))}">
+    <form method="POST" action="/pipeline/${escHtml(pipeline.id)}/package/${escHtml(pkg.commitHash.slice(0, 7))}/sync" style="margin:0">
       <button class="sync-btn" type="submit">Sync now</button>
     </form>
   </header>
