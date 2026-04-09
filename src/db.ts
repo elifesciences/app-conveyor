@@ -1,6 +1,12 @@
 import { Database } from "bun:sqlite";
 import { runMigrations } from "./migrations";
-import type { Package, StepHistoryEntry, StepState } from "./types";
+import type {
+  Package,
+  PipelineConfig,
+  StepHistoryEntry,
+  StepState,
+} from "./types";
+import { now } from "./util";
 
 interface PackageRow {
   id: string;
@@ -215,4 +221,64 @@ export function getStepHistory(
       "SELECT * FROM step_history WHERE package_id = ? AND step_id = ? ORDER BY id DESC LIMIT 20",
     )
     .all(packageId, stepId);
+}
+
+// ─── Package reset ─────────────────────────────────────────────────────────────
+
+/**
+ * Resets a package so the engine will re-advance it from scratch:
+ * - Git steps (preserveStepIds) are left untouched.
+ * - Steps absent from newSnapshot (if provided) are marked 'skipped'.
+ * - All remaining steps are reset to 'pending'.
+ * - If newSnapshot is provided, config_snapshot is updated.
+ *
+ * Status changes are recorded in step_history for auditability.
+ */
+export function resetPackage(
+  packageId: string,
+  preserveStepIds: string[],
+  newSnapshot?: PipelineConfig,
+): void {
+  const db = getDb();
+  const ts = now();
+  const preserveSet = new Set(preserveStepIds);
+  const newStepIds = newSnapshot
+    ? new Set(newSnapshot.steps.map((s) => s.id))
+    : null;
+
+  const rows = db
+    .query<{ step_id: string; status: string }, [string]>(
+      "SELECT step_id, status FROM step_states WHERE package_id = ?",
+    )
+    .all(packageId);
+
+  for (const { step_id, status } of rows) {
+    if (preserveSet.has(step_id)) continue;
+
+    const isOrphaned = newStepIds !== null && !newStepIds.has(step_id);
+    const newStatus = isOrphaned ? "skipped" : "pending";
+    const newLabel = isOrphaned ? "–" : "…";
+    const newDetail = isOrphaned ? "step removed from pipeline config" : null;
+
+    db.run(
+      "UPDATE step_states SET status = ?, label = ?, detail = ?, updated_at = ? WHERE package_id = ? AND step_id = ?",
+      [newStatus, newLabel, newDetail, ts, packageId, step_id],
+    );
+
+    if (status !== newStatus) {
+      db.run(
+        "INSERT INTO step_history (package_id, step_id, status, label, detail, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [packageId, step_id, newStatus, newLabel, newDetail, ts],
+      );
+    }
+  }
+
+  if (newSnapshot) {
+    db.run(
+      "UPDATE packages SET config_snapshot = ?, updated_at = ? WHERE id = ?",
+      [JSON.stringify(newSnapshot), ts, packageId],
+    );
+  } else {
+    db.run("UPDATE packages SET updated_at = ? WHERE id = ?", [ts, packageId]);
+  }
 }

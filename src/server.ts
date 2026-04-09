@@ -1,4 +1,9 @@
-import { findPackageByCommitPrefix, getStepHistory, listPackages } from "./db";
+import {
+  findPackageByCommitPrefix,
+  getStepHistory,
+  listPackages,
+  resetPackage,
+} from "./db";
 import {
   renderDashboard,
   renderLandingPage,
@@ -66,6 +71,47 @@ export function createServer(
         if (!trigger)
           return new Response("Pipeline not found", { status: 404 });
         await trigger(commitPrefix);
+        return new Response(null, {
+          status: 303,
+          headers: {
+            Location: `/pipeline/${pipelineId}/package/${commitPrefix}`,
+          },
+        });
+      }
+
+      // POST /pipeline/:pipelineId/package/:commitId/retry — reset steps, keep snapshot
+      // POST /pipeline/:pipelineId/package/:commitId/reset — reset steps, adopt current config
+      const resetMatch = path.match(
+        /^\/pipeline\/([^/]+)\/package\/([a-f0-9]{7,40})\/(retry|reset)$/,
+      );
+      if (
+        resetMatch?.[1] &&
+        resetMatch[2] &&
+        resetMatch[3] &&
+        req.method === "POST"
+      ) {
+        const pipelineId = resetMatch[1];
+        const commitPrefix = resetMatch[2];
+        const action = resetMatch[3] as "retry" | "reset";
+        const pipeline = pipelineMap.get(pipelineId);
+        if (!pipeline)
+          return new Response("Pipeline not found", { status: 404 });
+        const pkg = findPackageByCommitPrefix(pipelineId, commitPrefix);
+        if (!pkg) return new Response("Package not found", { status: 404 });
+        const effectiveCfg = pkg.configSnapshot ?? pipeline;
+        const gitStepIds = effectiveCfg.steps
+          .filter((s) => s.type === "git")
+          .map((s) => s.id);
+        resetPackage(
+          pkg.id,
+          gitStepIds,
+          action === "reset" ? pipeline : undefined,
+        );
+        console.log(
+          `[server] ${action} package ${pkg.commitHash.slice(0, 7)} in pipeline ${pipelineId}`,
+        );
+        const trigger = packagePollers.get(pipelineId);
+        if (trigger) trigger(commitPrefix).catch(console.error);
         return new Response(null, {
           status: 303,
           headers: {

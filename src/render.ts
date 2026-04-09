@@ -102,6 +102,8 @@ header .refresh-hint { margin-left: auto; color: var(--muted); font-size: 0.75re
   transition: border-color 0.15s, color 0.15s;
 }
 .sync-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+.sync-btn.warn:hover { border-color: var(--running); color: var(--running); }
+.sync-btn.danger:hover { border-color: var(--failed); color: var(--failed); }
 
 /* ── Landing page pipeline cards ── */
 .pipeline-list {
@@ -495,6 +497,17 @@ export function renderPackageDetail(
 ): string {
   const detailCSS = `
     ${CSS}
+    details.action-menu { position: relative; display: inline-block; }
+    details.action-menu summary { list-style: none; cursor: pointer; }
+    details.action-menu summary::-webkit-details-marker { display: none; }
+    details.action-menu .action-items {
+      position: absolute; right: 0; top: calc(100% + 4px);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+      padding: 0.25rem; display: flex; flex-direction: column; gap: 0.25rem;
+      z-index: 20; min-width: 13rem;
+    }
+    details.action-menu .action-items form { margin: 0; }
+    details.action-menu .action-items .sync-btn { width: 100%; text-align: left; }
     .step-detail { border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem; background: var(--surface); }
     .step-detail h3 { font-size: 0.85rem; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.06em; }
     .detail-text { color: var(--muted); font-size: 0.75rem; margin-bottom: 0.5rem; white-space: pre-wrap; word-break: break-all; }
@@ -567,9 +580,22 @@ export function renderPackageDetail(
       <span style="color:var(--muted);font-weight:400"> / </span>
       <a class="breadcrumb" href="https://github.com/${escHtml(pkg.repoFullName)}/commit/${pkg.commitHash}" target="_blank" rel="noopener">${pkg.commitHash.slice(0, 7)}</a>
     </h1>
-    <form method="POST" action="/pipeline/${escHtml(pipeline.id)}/package/${escHtml(pkg.commitHash.slice(0, 7))}/sync" style="margin:0">
-      <button class="sync-btn" type="submit">Sync now</button>
-    </form>
+    <div style="display:flex;gap:0.5rem;align-items:center;margin:0">
+      <form method="POST" action="/pipeline/${escHtml(pipeline.id)}/package/${escHtml(pkg.commitHash.slice(0, 7))}/sync" style="margin:0">
+        <button class="sync-btn" type="submit">Sync now</button>
+      </form>
+      <details class="action-menu">
+        <summary class="sync-btn">Actions ▾</summary>
+        <div class="action-items">
+          <form method="POST" action="/pipeline/${escHtml(pipeline.id)}/package/${escHtml(pkg.commitHash.slice(0, 7))}/retry">
+            <button class="sync-btn warn" type="submit">Retry</button>
+          </form>
+          <form method="POST" action="/pipeline/${escHtml(pipeline.id)}/package/${escHtml(pkg.commitHash.slice(0, 7))}/reset">
+            <button class="sync-btn danger" type="submit">Reset with current config</button>
+          </form>
+        </div>
+      </details>
+    </div>
   </header>
   <div style="margin-bottom:1rem">
     <div style="color:var(--text);font-size:0.8rem;margin-bottom:0.25rem">${escHtml(pkg.message ?? "")}</div>

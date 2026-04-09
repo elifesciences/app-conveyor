@@ -10,6 +10,7 @@ const {
   getPackage,
   listPackages,
   getStepHistory,
+  resetPackage,
 } = await import("../db");
 
 const PIPELINE = "test-pipeline";
@@ -110,4 +111,118 @@ test("listPackages returns most recent first", () => {
 
 test("getPackage returns null for unknown id", () => {
   expect(getPackage("0000000000000000000000000000000000000000")).toBeNull();
+});
+
+// ─── resetPackage ─────────────────────────────────────────────────────────────
+
+const RESET_ID = "eeee100000000000000000000000000000000001";
+
+function seedForReset() {
+  upsertPackage(freshPkg(RESET_ID));
+  // git step (preserved)
+  upsertStepState(RESET_ID, {
+    stepId: "src",
+    status: "passed",
+    label: "eeee100",
+    updatedAt: new Date().toISOString(),
+    commitHash: RESET_ID,
+  });
+  // downstream steps
+  upsertStepState(RESET_ID, {
+    stepId: "ci",
+    status: "passed",
+    label: "#1",
+    updatedAt: new Date().toISOString(),
+  });
+  upsertStepState(RESET_ID, {
+    stepId: "deploy",
+    status: "failed",
+    label: "err",
+    detail: "timeout",
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+test("resetPackage resets non-git steps to pending", () => {
+  seedForReset();
+  resetPackage(RESET_ID, ["src"]);
+  const pkg = getPackage(RESET_ID);
+  if (!pkg) throw new Error("expected package");
+  const src = pkg.steps.find((s) => s.stepId === "src");
+  const ci = pkg.steps.find((s) => s.stepId === "ci");
+  const deploy = pkg.steps.find((s) => s.stepId === "deploy");
+  expect(src?.status).toBe("passed"); // git step untouched
+  expect(ci?.status).toBe("pending");
+  expect(deploy?.status).toBe("pending");
+});
+
+test("resetPackage records history for status changes", () => {
+  const id = "eeee200000000000000000000000000000000001";
+  upsertPackage(freshPkg(id));
+  upsertStepState(id, {
+    stepId: "ci",
+    status: "failed",
+    label: "err",
+    updatedAt: new Date().toISOString(),
+  });
+  resetPackage(id, []);
+  const hist = getStepHistory(id, "ci");
+  expect(hist[0]?.status).toBe("pending"); // most recent entry
+});
+
+test("resetPackage with newSnapshot marks orphaned steps skipped", () => {
+  const id = "eeee300000000000000000000000000000000001";
+  upsertPackage(freshPkg(id));
+  upsertStepState(id, {
+    stepId: "src",
+    status: "passed",
+    label: "eeee300",
+    updatedAt: new Date().toISOString(),
+  });
+  upsertStepState(id, {
+    stepId: "ci",
+    status: "passed",
+    label: "#2",
+    updatedAt: new Date().toISOString(),
+  });
+  upsertStepState(id, {
+    stepId: "old-step",
+    status: "failed",
+    label: "err",
+    updatedAt: new Date().toISOString(),
+  });
+
+  const newConfig = {
+    id: PIPELINE,
+    name: "Test Pipeline",
+    steps: [
+      { id: "src", type: "git" as const, repo: "org/app", branch: "main" },
+      { id: "ci", type: "gha" as const, repo: "org/app", workflow: "ci.yaml" },
+      // old-step removed
+    ],
+  };
+
+  resetPackage(id, ["src"], newConfig);
+  const pkg = getPackage(id);
+  if (!pkg) throw new Error("expected package");
+  const ci = pkg.steps.find((s) => s.stepId === "ci");
+  const oldStep = pkg.steps.find((s) => s.stepId === "old-step");
+  expect(ci?.status).toBe("pending");
+  expect(oldStep?.status).toBe("skipped");
+  expect(oldStep?.detail).toBe("step removed from pipeline config");
+});
+
+test("resetPackage with newSnapshot updates config_snapshot", () => {
+  const id = "eeee400000000000000000000000000000000001";
+  upsertPackage(freshPkg(id));
+  const newConfig = {
+    id: PIPELINE,
+    name: "Updated Pipeline",
+    steps: [
+      { id: "src", type: "git" as const, repo: "org/app", branch: "main" },
+    ],
+  };
+  resetPackage(id, ["src"], newConfig);
+  const pkg = getPackage(id);
+  expect(pkg?.configSnapshot?.name).toBe("Updated Pipeline");
 });
