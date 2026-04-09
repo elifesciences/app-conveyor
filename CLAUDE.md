@@ -76,6 +76,12 @@ Fine-grained PATs cannot access organisation-owned packages via the GitHub Packa
 
 ## CRD schema generation
 
+When changing `src/schemas.ts`, the full workflow is:
+1. `bun run gen-crds` — regenerate `crds/pipeline.yaml`
+2. `bun run test:crds` — verify the CRD against a real KinD cluster (requires Docker)
+3. `bun run check` — unit tests and type check
+4. Commit the schema change and the updated `crds/pipeline.yaml` together
+
 `scripts/gen-crds.ts` derives the CRD `openAPIV3Schema` from the Zod schemas via `.toJSONSchema()`. Two K8s compatibility gotchas to be aware of:
 
 - **`exclusiveMinimum`** — Zod v4's `.toJSONSchema()` emits JSON Schema 2020-12 (`exclusiveMinimum: <number>`), but K8s CRDs require OpenAPI 3.0 (`exclusiveMinimum: true` + `minimum: <number>`). Avoid `.positive()` and `.gt(n)` on integer fields; use `.min(n+1)` instead, which generates a plain `minimum` constraint that K8s accepts.
