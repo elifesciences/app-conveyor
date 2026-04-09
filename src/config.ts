@@ -1,4 +1,5 @@
 import { YAML } from "bun";
+import { AppConfigSchema } from "./schemas";
 import type { AppConfig } from "./types";
 
 export async function loadConfig(): Promise<AppConfig> {
@@ -11,27 +12,19 @@ export async function loadConfig(): Promise<AppConfig> {
     process.exit(1);
   }
 
-  const text = await file.text();
-  const cfg = YAML.parse(text) as AppConfig;
+  const raw = YAML.parse(await file.text());
+  const result = AppConfigSchema.safeParse(raw);
 
-  if (!Array.isArray(cfg?.pipelines) || cfg.pipelines.length === 0) {
-    console.error(`[config] No pipelines defined in ${configPath}`);
+  if (!result.success) {
+    console.error(`[config] Invalid config in ${configPath}:`);
+    for (const issue of result.error.issues) {
+      console.error(`  ${issue.path.join(".")}: ${issue.message}`);
+    }
     process.exit(1);
   }
 
-  for (const pipeline of cfg.pipelines) {
-    if (!pipeline.id || !pipeline.name) {
-      console.error(`[config] Each pipeline must have an id and name`);
-      process.exit(1);
-    }
-    if (!Array.isArray(pipeline.steps) || pipeline.steps.length === 0) {
-      console.error(`[config] Pipeline "${pipeline.id}" has no steps`);
-      process.exit(1);
-    }
-  }
-
   console.log(
-    `[config] Loaded ${cfg.pipelines.length} pipeline(s) from ${configPath}`,
+    `[config] Loaded ${result.data.pipelines.length} pipeline(s) from ${configPath}`,
   );
-  return cfg;
+  return result.data;
 }

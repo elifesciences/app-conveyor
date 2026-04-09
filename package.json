@@ -8,6 +8,8 @@
     "dev": "bun --watch run index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "gen-crds": "bun scripts/gen-crds.ts",
+    "test:crds": "bash scripts/test-crds.sh",
     "check": "bunx biome check && bun run typecheck && bun run test"
   },
   "devDependencies": {
@@ -23,6 +25,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@kubernetes/client-node": "^1.4.0"
+    "@kubernetes/client-node": "^1.4.0",
+    "zod": "^4.3.6"
   }
 }

@@ -1,50 +1,13 @@
-// ─── Pipeline Configuration ──────────────────────────────────────────────────
+// ─── Pipeline Configuration (derived from Zod schemas in src/schemas.ts) ─────
 
-export type StepType =
-  | "git"
-  | "gha"
-  | "ghcr"
-  | "gh-pr"
-  | "flux-image"
-  | "flux-kustomize"
-  | "k8s-deploy";
+import type { PipelineConfig } from "./schemas";
 
-export interface StepConfig {
-  id: string;
-  type: StepType;
-  label?: string; // overrides the default column heading in the UI
-  // git
-  repo?: string;
-  branch?: string;
-  // gha
-  workflow?: string;
-  // ghcr
-  image?: string;
-  tagPattern?: string; // optional regex; if set, matched tags must also satisfy it
-  // gh-pr
-  author?: string; // filter PRs by author, e.g. "renovate[bot]"
-  // flux-image
-  policy?: string;
-  imageRepository?: string;
-  // flux-kustomize
-  name?: string;
-  automation?: string; // ImageUpdateAutomation resource name
-  // k8s-deploy
-  namespace?: string;
-  deployment?: string;
-  kind?: "Deployment" | "StatefulSet"; // defaults to Deployment
-}
-
-export interface PipelineConfig {
-  id: string;
-  name: string;
-  pollIntervalMs?: number;
-  steps: StepConfig[];
-}
-
-export interface AppConfig {
-  pipelines: PipelineConfig[];
-}
+export type {
+  AppConfig,
+  PipelineConfig,
+  StepConfig,
+  StepType,
+} from "./schemas";
 
 // ─── Package / Artifact ──────────────────────────────────────────────────────
 

@@ -19,9 +19,12 @@ A deployment pipeline tracker for GitOps workflows. It monitors commits from a s
 | `src/migrations.ts` | Schema migration runner — runs pending migrations on startup |
 | `src/server.ts` | HTTP server — UI routes and sync endpoints |
 | `src/render.ts` | Server-side HTML rendering |
-| `src/config.ts` | YAML config loading |
+| `src/config.ts` | YAML config loading and Zod validation |
+| `src/schemas.ts` | Zod schemas for pipeline config — single source of truth for types and CRD shape |
 | `src/kube.ts` | Kubernetes client with Bun TLS workaround |
 | `src/modules/` | One file per step type |
+| `scripts/gen-crds.ts` | Generates `crds/pipeline.yaml` from Zod schemas — run `bun run gen-crds` after schema changes |
+| `crds/pipeline.yaml` | Committed CRD manifest — always regenerate and commit alongside schema changes |
 
 The engine polls each pipeline on a configurable interval. Each poll discovers new commits (git step) and advances all in-progress packages by calling the appropriate module for each step in sequence. A step returning `pending` or `running` stops advancement for that package until the next poll.
 
@@ -70,6 +73,13 @@ Bun's `fetch()` ignores `https.Agent`, so the standard Node.js mechanism for inj
 ## GitHub API
 
 Fine-grained PATs cannot access organisation-owned packages via the GitHub Packages API — this is a GitHub platform limitation. A classic PAT with `read:packages` and `repo` scopes is required for any pipeline that uses the `ghcr` step against org-owned images.
+
+## CRD schema generation
+
+`scripts/gen-crds.ts` derives the CRD `openAPIV3Schema` from the Zod schemas via `.toJSONSchema()`. Two K8s compatibility gotchas to be aware of:
+
+- **`exclusiveMinimum`** — Zod v4's `.toJSONSchema()` emits JSON Schema 2020-12 (`exclusiveMinimum: <number>`), but K8s CRDs require OpenAPI 3.0 (`exclusiveMinimum: true` + `minimum: <number>`). Avoid `.positive()` and `.gt(n)` on integer fields; use `.min(n+1)` instead, which generates a plain `minimum` constraint that K8s accepts.
+- **`additionalProperties` + `properties`** — K8s structural schemas forbid both at the same level. `gen-crds.ts` strips all `additionalProperties` after generation. Unknown fields are still rejected — K8s uses strict decoding for CRDs, so unknown fields cause a `BadRequest` error rather than being silently pruned.
 
 ## Known gotcha: image tag hash matching
 
