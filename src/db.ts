@@ -13,6 +13,7 @@ interface PackageRow {
   created_at: string;
   updated_at: string;
   current_step: number;
+  config_snapshot: string | null;
 }
 
 interface StepStateRow {
@@ -47,13 +48,13 @@ export function upsertPackage(pkg: Omit<Package, "steps">): void {
   const db = getDb();
   db.run(
     `
-    INSERT INTO packages (id, pipeline_id, commit_hash, repo, branch, author_name, message, created_at, updated_at, current_step)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO packages (id, pipeline_id, commit_hash, repo, branch, author_name, message, created_at, updated_at, current_step, config_snapshot)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
-      updated_at   = excluded.updated_at,
-      current_step = excluded.current_step,
-      author_name  = excluded.author_name,
-      message      = excluded.message
+      updated_at      = excluded.updated_at,
+      current_step    = excluded.current_step,
+      author_name     = excluded.author_name,
+      message         = excluded.message
   `,
     [
       pkg.id,
@@ -66,6 +67,7 @@ export function upsertPackage(pkg: Omit<Package, "steps">): void {
       pkg.createdAt,
       pkg.updatedAt,
       pkg.currentStep,
+      pkg.configSnapshot ? JSON.stringify(pkg.configSnapshot) : null,
     ],
   );
 }
@@ -181,6 +183,9 @@ function hydrate(db: Database, row: PackageRow): Package {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     currentStep: row.current_step,
+    configSnapshot: row.config_snapshot
+      ? JSON.parse(row.config_snapshot)
+      : undefined,
     steps,
   };
 }

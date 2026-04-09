@@ -91,4 +91,5 @@ export interface Package {
   updatedAt: string; // ISO
   steps: StepState[];
   currentStep: number;
+  configSnapshot?: PipelineConfig; // pipeline config at the time the package was created
 }

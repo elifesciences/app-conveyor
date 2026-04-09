@@ -30,6 +30,8 @@ The engine polls each pipeline on a configurable interval. Each poll discovers n
 Schema changes go in `src/migrations.ts` as numbered entries in the `migrations` array. Rules:
 
 - **Append only** — never edit or reorder existing entries; each version number must be stable
+- `config_snapshot` in the `packages` table is **write-once** — set at package creation, intentionally excluded from the `ON CONFLICT DO UPDATE` in `upsertPackage`. Do not add it to the UPDATE clause.
+- `advancePackage` uses `pkg.configSnapshot ?? this.cfg` so that in-flight packages continue with the config they were created under. The `?? this.cfg` fallback is intentional for packages that pre-date the snapshot column — do not remove it.
 - **Additive where possible** — prefer `ALTER TABLE ... ADD COLUMN` with a default over destructive changes
 - Migration 1 is the initial schema and uses `CREATE TABLE IF NOT EXISTS` so it is safe to run against databases that existed before the migration system was introduced; subsequent migrations should use plain `CREATE TABLE`
 

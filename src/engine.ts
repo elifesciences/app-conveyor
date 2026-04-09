@@ -102,6 +102,7 @@ export class Engine {
           createdAt: now(),
           updatedAt: now(),
           currentStep: 0,
+          configSnapshot: this.cfg,
         };
         upsertPackage(pkg);
 
@@ -134,12 +135,13 @@ export class Engine {
   }
 
   async advancePackage(pkg: Package) {
+    const pipelineCfg = pkg.configSnapshot ?? this.cfg;
     const stepMap = new Map(pkg.steps.map((s) => [s.stepId, s]));
     const upstream = this.gatherUpstream(
       pkg.steps.filter((s) => s.status === "passed"),
     );
 
-    for (const stepCfg of this.cfg.steps) {
+    for (const stepCfg of pipelineCfg.steps) {
       if (stepCfg.type === "git") continue;
 
       const current = stepMap.get(stepCfg.id);
