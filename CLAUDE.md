@@ -22,6 +22,7 @@ A deployment pipeline tracker for GitOps workflows. It monitors commits from a s
 | `src/config.ts` | YAML config loading and Zod validation |
 | `src/schemas.ts` | Zod schemas for pipeline config — single source of truth for types and CRD shape |
 | `src/kube.ts` | Kubernetes client with Bun TLS workaround |
+| `src/reconciler.ts` | CRD watcher — lists and watches Pipeline CRs, manages engine lifecycle |
 | `src/modules/` | One file per step type |
 | `scripts/gen-crds.ts` | Generates `crds/pipeline.yaml` from Zod schemas — run `bun run gen-crds` after schema changes |
 | `crds/pipeline.yaml` | Committed CRD manifest — always regenerate and commit alongside schema changes |
@@ -66,6 +67,10 @@ test("example", () => {
 
 The frontend is server-side rendered HTML only — plain string templates in `src/render.ts`. Do not add client-side JavaScript: no `<script>` tags, no inline event handlers, no `fetch()` from the browser. Use `<form method="POST">` for actions and HTTP 303 redirects from the server.
 
+## Watch TLS
+
+`k8s.Watch` uses Node.js `https.request` directly (not Bun's `fetch()`), so the `wrapHttpLibrary` workaround in `kube.ts` does not apply to it. When connecting to clusters with self-signed CAs (e.g. KinD), the Watch will fail with `unable to verify the first certificate`. The test script `scripts/test-reconciler.sh` works around this by extracting the CA cert from the kubeconfig and setting `NODE_EXTRA_CA_CERTS`. In production the in-cluster service account CA bundle is used by the OS trust store and this issue does not arise.
+
 ## Kubernetes TLS
 
 Bun's `fetch()` ignores `https.Agent`, so the standard Node.js mechanism for injecting CA certs does not work. This is already solved in `src/kube.ts` using `wrapHttpLibrary` from `@kubernetes/client-node`, which extracts the CA/cert/key from the agent and passes them via Bun's non-standard `tls` fetch option. Do not reach for `NODE_EXTRA_CA_CERTS` or process re-exec as a solution to Kubernetes TLS issues.
@@ -73,6 +78,17 @@ Bun's `fetch()` ignores `https.Agent`, so the standard Node.js mechanism for inj
 ## GitHub API
 
 Fine-grained PATs cannot access organisation-owned packages via the GitHub Packages API — this is a GitHub platform limitation. A classic PAT with `read:packages` and `repo` scopes is required for any pipeline that uses the `ghcr` step against org-owned images.
+
+## Reconciler and config modes
+
+Both config sources can be active simultaneously. `index.ts` starts each source independently:
+
+- **Static config** (`conveyor.yaml` or `CONFIG_PATH`) — loaded first at startup via `loadConfig()`, which returns `null` if the file is absent (not an error). Engines are created once and never change at runtime. Their IDs are registered as `reservedIds`.
+- **CRD watch** (`WATCH_NAMESPACE` set) — `Reconciler` lists existing Pipeline CRs then watches for changes, starting/stopping/restarting engines dynamically. Reserved IDs are passed to the reconciler; ADDED/MODIFIED/DELETED events for those IDs are silently ignored so static config always wins.
+
+Both sources write into the same shared `pipelines`, `pollers`, and `packagePollers` maps, which are passed by reference to `createServer` so it always sees the live union. At least one source must be active; the process exits with an error if neither is configured.
+
+`WATCH_NAMESPACE` accepts comma-separated namespaces (e.g. `default,staging`) or `*` for all namespaces. `*` uses the cluster-scoped watch path (`/apis/{group}/{version}/{plural}`) and requires a `ClusterRoleBinding`; named namespaces can use per-namespace `RoleBinding`s.
 
 ## CRD schema generation
 

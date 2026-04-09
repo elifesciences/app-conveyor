@@ -75,12 +75,19 @@ export interface KubeClient {
   customObjects: k8s.CustomObjectsApi;
 }
 
+let _kc: k8s.KubeConfig | null = null;
 let _client: KubeClient | null = null;
+
+export function getKubeConfig(): k8s.KubeConfig {
+  if (_kc) return _kc;
+  _kc = new k8s.KubeConfig();
+  _kc.loadFromDefault();
+  return _kc;
+}
 
 export function getKubeClient(): KubeClient {
   if (_client) return _client;
-  const kc = new k8s.KubeConfig();
-  kc.loadFromDefault();
+  const kc = getKubeConfig();
   _client = {
     appsV1: makeApiClient(kc, k8s.AppsV1Api),
     customObjects: makeApiClient(kc, k8s.CustomObjectsApi),

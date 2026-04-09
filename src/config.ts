@@ -2,14 +2,17 @@ import { YAML } from "bun";
 import { AppConfigSchema } from "./schemas";
 import type { AppConfig } from "./types";
 
-export async function loadConfig(): Promise<AppConfig> {
-  const configPath = process.env.CONFIG_PATH ?? "conveyor.yaml";
+export async function loadConfig(): Promise<AppConfig | null> {
+  const explicitPath = process.env.CONFIG_PATH;
+  const configPath = explicitPath ?? "conveyor.yaml";
   const file = Bun.file(configPath);
 
   if (!(await file.exists())) {
-    console.error(`[config] Config file not found: ${configPath}`);
-    console.error(`[config] Create conveyor.yaml or set CONFIG_PATH`);
-    process.exit(1);
+    if (explicitPath) {
+      console.error(`[config] Config file not found: ${configPath}`);
+      process.exit(1);
+    }
+    return null; // conveyor.yaml absent — YAML source simply inactive
   }
 
   const raw = YAML.parse(await file.text());
@@ -24,7 +27,7 @@ export async function loadConfig(): Promise<AppConfig> {
   }
 
   console.log(
-    `[config] Loaded ${result.data.pipelines.length} pipeline(s) from ${configPath}`,
+    `[config] Loaded ${result.data.pipelines.length} static pipeline(s) from ${configPath}`,
   );
   return result.data;
 }

@@ -4,7 +4,14 @@ A deployment pipeline orchestrator that tracks commits from source code through 
 
 ## How it works
 
-Pipelines are defined in a YAML config file. Each pipeline has a sequence of steps; App Conveyor polls each step and advances packages (identified by a commit hash) through the pipeline as each stage completes.
+Each pipeline has a sequence of steps; App Conveyor polls each step and advances packages (identified by a commit hash) through the pipeline as each stage completes.
+
+Pipelines come from two sources that can run simultaneously:
+
+- **Kubernetes CRDs** — create `Pipeline` custom resources in your cluster; App Conveyor watches them and starts/stops engines dynamically as CRs are added, updated, or deleted. Enabled by setting `WATCH_NAMESPACE`.
+- **YAML config file** — define pipelines in `conveyor.yaml` (or `CONFIG_PATH`). Loaded once at startup; requires a restart to pick up changes. Enabled automatically when the file is present.
+
+Both sources contribute to the same live pipeline list. If the same pipeline ID appears in both, the YAML definition takes precedence and the CRD is ignored — useful for ops-team-owned pipelines that should not be overridden by cluster resources.
 
 Supported step types:
 
@@ -34,7 +41,21 @@ This will install the correct version of Bun automatically.
 bun install
 ```
 
-Create a `conveyor.yaml` config file. Example:
+### Enable CRD watching
+
+Apply the CRD, create `Pipeline` resources in your cluster, then set `WATCH_NAMESPACE`:
+
+```bash
+kubectl apply -f crds/pipeline.yaml
+kubectl apply -f k8s/example-pipeline.yaml   # or your own Pipeline CR
+WATCH_NAMESPACE=default bun run index.ts
+```
+
+Use `WATCH_NAMESPACE=*` to watch all namespaces (requires cluster-level RBAC — see [docs/deployment.md](docs/deployment.md)).
+
+### Enable static YAML pipelines
+
+Create a `conveyor.yaml` file alongside (or instead of) CRD watching. Example:
 
 ```yaml
 pipelines:
@@ -68,7 +89,8 @@ Any pipeline using `flux-image`, `flux-kustomize`, or `k8s-deploy` steps require
 
 | Variable | Default | Description |
 |---|---|---|
-| `CONFIG_PATH` | `conveyor.yaml` | Path to the pipeline config file |
+| `WATCH_NAMESPACE` | — | Comma-separated namespace(s) to watch for Pipeline CRDs, or `*` for all namespaces. Omit to disable CRD watching. |
+| `CONFIG_PATH` | — | Path to a static pipeline config file. If unset, `conveyor.yaml` is used when present. |
 | `DB_PATH` | `conveyor.db` | Path to the SQLite database |
 | `PORT` | `3000` | HTTP server port |
 | `GITHUB_TOKEN` | — | GitHub PAT for API access (required for private repos and GHCR) |

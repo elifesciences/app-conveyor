@@ -1,0 +1,19 @@
+apiVersion: app-conveyor.elifesciences.org/v1alpha1
+kind: Pipeline
+metadata:
+  name: app-conveyor
+  namespace: default
+spec:
+  name: App Conveyor
+  steps:
+    - id: src
+      type: git
+      repo: elifesciences/app-conveyor
+      branch: main
+    - id: ci
+      type: gha
+      repo: elifesciences/app-conveyor
+      workflow: build-push.yml
+    - id: image
+      type: ghcr
+      image: elifesciences/app-conveyor

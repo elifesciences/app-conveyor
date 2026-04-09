@@ -9,17 +9,14 @@ import {
   renderLandingPage,
   renderPackageDetail,
 } from "./render";
-import type { AppConfig, PipelineConfig, StepHistoryEntry } from "./types";
+import type { PipelineConfig, StepHistoryEntry } from "./types";
 
 export function createServer(
-  cfg: AppConfig,
+  pipelines: Map<string, PipelineConfig>,
   pollers: Map<string, () => Promise<void>>,
   packagePollers: Map<string, (commitPrefix: string) => Promise<void>>,
 ) {
   const port = Number(process.env.PORT ?? 3000);
-  const pipelineMap = new Map<string, PipelineConfig>(
-    cfg.pipelines.map((p) => [p.id, p]),
-  );
 
   const server = Bun.serve({
     port,
@@ -29,7 +26,7 @@ export function createServer(
 
       // GET / — landing page
       if (path === "/" || path === "") {
-        const pipelineSummaries = cfg.pipelines.map((pipeline) => {
+        const pipelineSummaries = [...pipelines.values()].map((pipeline) => {
           const latest = listPackages(pipeline.id, 1)[0] ?? null;
           return { pipeline, latest };
         });
@@ -93,7 +90,7 @@ export function createServer(
         const pipelineId = resetMatch[1];
         const commitPrefix = resetMatch[2];
         const action = resetMatch[3] as "retry" | "reset";
-        const pipeline = pipelineMap.get(pipelineId);
+        const pipeline = pipelines.get(pipelineId);
         if (!pipeline)
           return new Response("Pipeline not found", { status: 404 });
         const pkg = findPackageByCommitPrefix(pipelineId, commitPrefix);
@@ -124,7 +121,7 @@ export function createServer(
       const dashMatch = path.match(/^\/pipeline\/([^/]+)$/);
       if (dashMatch?.[1] && req.method === "GET") {
         const pipelineId = dashMatch[1];
-        const pipeline = pipelineMap.get(pipelineId);
+        const pipeline = pipelines.get(pipelineId);
         if (!pipeline)
           return new Response("Pipeline not found", { status: 404 });
         const packages = listPackages(pipelineId, 50);
@@ -140,7 +137,7 @@ export function createServer(
       );
       if (detailMatch?.[1] && detailMatch[2] && req.method === "GET") {
         const pipelineId = detailMatch[1];
-        const pipeline = pipelineMap.get(pipelineId);
+        const pipeline = pipelines.get(pipelineId);
         if (!pipeline)
           return new Response("Pipeline not found", { status: 404 });
         const pkg = findPackageByCommitPrefix(pipelineId, detailMatch[2]);
