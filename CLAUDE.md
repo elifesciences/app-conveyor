@@ -16,6 +16,7 @@ A deployment pipeline tracker for GitOps workflows. It monitors commits from a s
 | `index.ts` | Entry point — loads config, starts engines, starts server |
 | `src/engine.ts` | Polling loop — discovers commits, advances packages through steps |
 | `src/db.ts` | SQLite persistence — packages, step states, step history |
+| `src/migrations.ts` | Schema migration runner — runs pending migrations on startup |
 | `src/server.ts` | HTTP server — UI routes and sync endpoints |
 | `src/render.ts` | Server-side HTML rendering |
 | `src/config.ts` | YAML config loading |
@@ -23,6 +24,14 @@ A deployment pipeline tracker for GitOps workflows. It monitors commits from a s
 | `src/modules/` | One file per step type |
 
 The engine polls each pipeline on a configurable interval. Each poll discovers new commits (git step) and advances all in-progress packages by calling the appropriate module for each step in sequence. A step returning `pending` or `running` stops advancement for that package until the next poll.
+
+## Database migrations
+
+Schema changes go in `src/migrations.ts` as numbered entries in the `migrations` array. Rules:
+
+- **Append only** — never edit or reorder existing entries; each version number must be stable
+- **Additive where possible** — prefer `ALTER TABLE ... ADD COLUMN` with a default over destructive changes
+- Migration 1 is the initial schema and uses `CREATE TABLE IF NOT EXISTS` so it is safe to run against databases that existed before the migration system was introduced; subsequent migrations should use plain `CREATE TABLE`
 
 ## Bun
 

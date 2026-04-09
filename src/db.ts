@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { runMigrations } from "./migrations";
 import type { Package, StepHistoryEntry, StepState } from "./types";
 
 interface PackageRow {
@@ -36,55 +37,8 @@ export function getDb(): Database {
   _db = new Database(process.env.DB_PATH ?? "conveyor.db", { create: true });
   _db.run("PRAGMA journal_mode = WAL");
   _db.run("PRAGMA foreign_keys = ON");
-  initSchema(_db);
+  runMigrations(_db);
   return _db;
-}
-
-function initSchema(db: Database) {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS packages (
-      id           TEXT PRIMARY KEY,
-      pipeline_id  TEXT NOT NULL,
-      commit_hash  TEXT NOT NULL,
-      repo         TEXT NOT NULL,
-      branch       TEXT NOT NULL,
-      author_name  TEXT,
-      message      TEXT,
-      created_at   TEXT NOT NULL,
-      updated_at   TEXT NOT NULL,
-      current_step INTEGER NOT NULL DEFAULT 0
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS step_states (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      package_id   TEXT NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
-      step_id      TEXT NOT NULL,
-      status       TEXT NOT NULL DEFAULT 'pending',
-      label        TEXT NOT NULL DEFAULT '',
-      detail       TEXT,
-      updated_at   TEXT NOT NULL,
-      commit_hash  TEXT,
-      gha_run_id   TEXT,
-      image_digest TEXT,
-      image_tag    TEXT,
-      sync_revision TEXT,
-      UNIQUE(package_id, step_id)
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS step_history (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      package_id   TEXT NOT NULL,
-      step_id      TEXT NOT NULL,
-      status       TEXT NOT NULL,
-      label        TEXT NOT NULL DEFAULT '',
-      detail       TEXT,
-      recorded_at  TEXT NOT NULL
-    )
-  `);
 }
 
 // ─── Package CRUD ─────────────────────────────────────────────────────────────
