@@ -74,6 +74,35 @@ const migrations: Migration[] = [
         "ALTER TABLE packages ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
       ),
   },
+  {
+    // Fix inconsistent state: superseded packages must not have pending/running
+    // steps. This can occur if a reset happened just before the package was
+    // superseded, leaving downstream steps stuck in 'pending' permanently.
+    version: 4,
+    up: (db) => {
+      const stale = db
+        .query<{ package_id: string; step_id: string }, []>(
+          `SELECT ss.package_id, ss.step_id
+           FROM step_states ss
+           JOIN packages p ON p.id = ss.package_id
+           WHERE p.status = 'superseded'
+             AND ss.status IN ('pending', 'running')`,
+        )
+        .all();
+      const ts = new Date().toISOString();
+      const detail = "superseded by newer deployment";
+      for (const { package_id, step_id } of stale) {
+        db.run(
+          "UPDATE step_states SET status = 'skipped', label = '–', detail = ?, updated_at = ? WHERE package_id = ? AND step_id = ?",
+          [detail, ts, package_id, step_id],
+        );
+        db.run(
+          "INSERT INTO step_history (package_id, step_id, status, label, detail, recorded_at) VALUES (?, ?, 'skipped', '–', ?, ?)",
+          [package_id, step_id, detail, ts],
+        );
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {
