@@ -1,19 +1,33 @@
 apiVersion: app-conveyor.elifesciences.org/v1alpha1
 kind: Pipeline
 metadata:
-  name: app-conveyor
+  name: my-app
   namespace: default
 spec:
-  name: App Conveyor
+  name: My App
+  pollIntervalMs: 60000
   steps:
     - id: src
       type: git
-      repo: elifesciences/app-conveyor
+      repo: my-org/my-app
       branch: main
-    - id: ci
+    - id: build
       type: gha
-      repo: elifesciences/app-conveyor
+      repo: my-org/my-app
       workflow: build-push.yml
     - id: image
       type: ghcr
-      image: elifesciences/app-conveyor
+      image: my-org/my-app
+    - id: flux-update
+      type: flux-image
+      policy: my-app-policy
+      automation: my-app-automation  # waits for automation to push GitOps commit
+      namespace: flux-system
+    - id: flux-sync
+      type: flux-kustomize
+      name: my-app
+      namespace: flux-system
+    - id: deploy
+      type: k8s-deploy
+      name: my-app
+      namespace: my-namespace

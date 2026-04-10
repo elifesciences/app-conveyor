@@ -92,6 +92,43 @@ pipelines:
         deployment: my-app
 ```
 
+## Step configuration reference
+
+| Field | Steps | Description |
+|---|---|---|
+| `id` | all | Unique step identifier within the pipeline |
+| `type` | all | Step type (see list above) |
+| `label` | all | Optional display name override in the UI |
+| `repo` | `git`, `gha`, `ghcr` | GitHub repo in `owner/name` format |
+| `branch` | `git` | Branch to watch for new commits |
+| `workflow` | `gha` | Workflow filename (e.g. `build.yml`) |
+| `image` | `ghcr` | Image name in GHCR (e.g. `my-org/my-app`) |
+| `tagPattern` | `ghcr` | Regex to filter image tags |
+| `author` | `gh-pr` | PR author to track (e.g. `renovate[bot]`) |
+| `policy` | `flux-image` | Flux ImagePolicy name to watch |
+| `automation` | `flux-image`, `flux-kustomize` | Flux ImageUpdateAutomation name — see note below |
+| `name` | `flux-kustomize`, `k8s-deploy` | Kustomization or Deployment/StatefulSet name |
+| `namespace` | `flux-image`, `flux-kustomize`, `k8s-deploy` | Kubernetes namespace (default: `flux-system` for Flux steps) |
+| `kind` | `k8s-deploy` | `Deployment` or `StatefulSet` (default: `Deployment`) |
+
+### `automation` field placement
+
+When using Flux ImageUpdateAutomation, set `automation` on the **`flux-image`** step. This causes flux-image to wait for the automation to commit the tag change to the GitOps repo, and the step label shows the resulting push commit hash. That commit is then passed downstream to `flux-kustomize`, which verifies the Kustomization has applied it — without needing to query the automation again.
+
+Setting `automation` only on `flux-kustomize` still works as a fallback (the old behaviour), but the push commit will not appear as a label on the flux-image step.
+
+```yaml
+- id: flux-update
+  type: flux-image
+  policy: my-app-policy
+  automation: my-app-automation   # ← here, not only on flux-kustomize
+  namespace: flux-system
+- id: flux-sync
+  type: flux-kustomize
+  name: my-app
+  namespace: flux-system
+```
+
 ## Kubernetes context
 
 Any pipeline using `flux-image`, `flux-kustomize`, or `k8s-deploy` steps requires a valid kubeconfig with a current context pointing at the target cluster. App Conveyor uses the default kubeconfig discovery (`~/.kube/config`, `KUBECONFIG` env var, or in-cluster service account).
