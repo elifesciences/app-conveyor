@@ -27,9 +27,9 @@ export const StepConfigSchema = z.object({
   // flux-image
   policy: z.string().optional(),
   imageRepository: z.string().optional(),
+  automation: z.string().optional(),
   // flux-kustomize
   name: z.string().optional(),
-  automation: z.string().optional(),
   // k8s-deploy
   namespace: z.string().optional(),
   deployment: z.string().optional(), // deprecated — use name
