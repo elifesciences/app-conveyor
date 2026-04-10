@@ -23,6 +23,7 @@ import { errorMessage, isK8sNotFound, now } from "../util";
 interface FluxCondition {
   type: string;
   status: string;
+  reason?: string;
   message?: string;
   lastTransitionTime?: string;
 }
@@ -154,9 +155,15 @@ export async function syncFluxKustomize(
         new Date(readyCondition.lastTransitionTime) >= lastPushTime;
       const pushSatisfied = pushApplied || reconciledAfterPush;
 
+      // DependencyNotReady is always transient — a sibling Kustomization that
+      // isn't ready yet. Don't mark failed even if pushApplied; it will recover.
+      const isDependencyTransient =
+        readyCondition?.reason === "DependencyNotReady";
+
       let status: StepState["status"];
       if (readyStatus === "True" && pushSatisfied) status = "passed";
-      else if (readyStatus === "False" && pushApplied) status = "failed";
+      else if (readyStatus === "False" && pushApplied && !isDependencyTransient)
+        status = "failed";
       else status = "running";
 
       return {
@@ -185,9 +192,13 @@ export async function syncFluxKustomize(
     const reconciledAfterImage =
       imageBuiltAt === null || conditionTime >= imageBuiltAt;
 
+    const isDependencyTransient =
+      readyCondition?.reason === "DependencyNotReady";
+
     let status: StepState["status"];
     if (readyStatus === "True" && reconciledAfterImage) status = "passed";
-    else if (readyStatus === "False") status = "failed";
+    else if (readyStatus === "False" && !isDependencyTransient)
+      status = "failed";
     else status = "running";
 
     return {
