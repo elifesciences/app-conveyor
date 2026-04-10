@@ -6,12 +6,50 @@ import {
   wrapHttpLibrary,
 } from "@kubernetes/client-node";
 
+type AgentOptions = {
+  ca?: Buffer;
+  cert?: Buffer;
+  key?: Buffer;
+  rejectUnauthorized?: boolean;
+};
+
 /**
- * Bun's fetch implementation does not honour the https.Agent passed by
- * @kubernetes/client-node, so the cluster CA from kubeconfig is never applied
- * to outgoing TLS connections. Bun does support a non-standard `tls` option on
- * fetch(), so we wrap the HTTP library to extract the cert/key/ca from the
- * agent built by @kubernetes/client-node and pass them through that way instead.
+ * Bun's fetch() ignores the https.Agent that @kubernetes/client-node attaches
+ * to request options, so the cluster CA/cert/key are never applied to outgoing
+ * TLS connections. This patch intercepts globalThis.fetch once at startup and,
+ * when an agent with TLS options is present, forwards them via Bun's non-standard
+ * `tls` fetch option instead.
+ *
+ * This covers both the API client path (via wrapHttpLibrary below) and the Watch
+ * path, which calls globalThis.fetch() directly with an agent in RequestInit.
+ */
+function installBunFetchTLSPatch(): void {
+  const original = globalThis.fetch.bind(globalThis);
+  // biome-ignore lint/suspicious/noExplicitAny: Bun extends fetch with non-standard options; casting avoids the `preconnect` property gap in its type definition
+  (globalThis as any).fetch = (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const agent = (init as { agent?: { options?: AgentOptions } } | undefined)
+      ?.agent;
+    if (agent?.options) {
+      return original(input, {
+        ...init,
+        tls: {
+          ca: agent.options.ca,
+          cert: agent.options.cert,
+          key: agent.options.key,
+          rejectUnauthorized: agent.options.rejectUnauthorized,
+        },
+      } as RequestInit);
+    }
+    return original(input, init);
+  };
+}
+
+/**
+ * Applies the same TLS extraction for the API client HTTP library wrapper,
+ * which receives agent options via a different interface than raw fetch().
  */
 function makeBunHttpLibrary() {
   return wrapHttpLibrary({
@@ -80,6 +118,7 @@ let _client: KubeClient | null = null;
 
 export function getKubeConfig(): k8s.KubeConfig {
   if (_kc) return _kc;
+  installBunFetchTLSPatch();
   _kc = new k8s.KubeConfig();
   _kc.loadFromDefault();
   return _kc;

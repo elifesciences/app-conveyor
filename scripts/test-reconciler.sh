@@ -44,7 +44,7 @@ cleanup() {
   fi
   echo "Deleting KinD cluster \"${CLUSTER_NAME}\"..."
   "$KIND" delete cluster --name "$CLUSTER_NAME" --kubeconfig "$KUBECONFIG" 2>/dev/null || true
-  rm -f "$KUBECONFIG" "$LOG_FILE" "/tmp/conveyor-kind-ca.crt"
+  rm -f "$KUBECONFIG" "$LOG_FILE"
 }
 trap cleanup EXIT
 
@@ -62,15 +62,7 @@ $KUBECTL apply -f k8s/example-pipeline.yaml
 
 echo "Starting app-conveyor in reconciler mode..."
 
-# k8s.Watch uses Node.js https.request directly, which doesn't pick up the CA
-# from the kubeconfig agent the same way Bun's fetch() does. Extract the KinD
-# CA cert and pass it via NODE_EXTRA_CA_CERTS so the Watch can verify TLS.
-CA_CERT_FILE="/tmp/conveyor-kind-ca.crt"
-$KUBECTL config view --raw \
-  -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
-  | base64 -d > "$CA_CERT_FILE"
-
-KUBECONFIG="$KUBECONFIG" WATCH_NAMESPACE="default" NODE_EXTRA_CA_CERTS="$CA_CERT_FILE" \
+KUBECONFIG="$KUBECONFIG" WATCH_NAMESPACE="default" \
   bun run index.ts >"$LOG_FILE" 2>&1 &
 APP_PID=$!
 
