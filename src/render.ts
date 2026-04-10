@@ -530,7 +530,10 @@ export function renderPackageDetail(
     a.breadcrumb:hover { text-decoration: underline; }
   `;
 
-  const steps = pipeline.steps.filter((s) => s.type !== "git");
+  // Use the config the package was created with so that steps added to the
+  // pipeline after this package was created don't appear as phantom "pending".
+  const effectivePipeline = pkg.configSnapshot ?? pipeline;
+  const steps = effectivePipeline.steps.filter((s) => s.type !== "git");
   const rows = steps
     .map((s) => {
       const state = pkg.steps.find((ps) => ps.stepId === s.id);
@@ -548,8 +551,14 @@ export function renderPackageDetail(
         )
         .join("");
 
-      const statusCls = state ? (STATUS_CLASS[state.status] ?? "") : "pending";
-      const statusTxt = state?.status ?? "pending";
+      // Superseded packages must not show pending/running — those steps will
+      // never advance. Normalize them to skipped for display only.
+      const rawStatus = state?.status ?? "pending";
+      const isStuck =
+        pkg.status === "superseded" &&
+        (rawStatus === "pending" || rawStatus === "running");
+      const statusTxt = isStuck ? "skipped" : rawStatus;
+      const statusCls = STATUS_CLASS[statusTxt] ?? "";
       const link = stepGithubLink(s, state);
 
       return `
