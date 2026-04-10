@@ -500,6 +500,7 @@ export function renderPackageDetail(
   pkg: Package,
   pipeline: PipelineConfig,
   history: StepHistoryEntry[],
+  canReset = false,
 ): string {
   const detailCSS = `
     ${CSS}
@@ -587,12 +588,18 @@ export function renderPackageDetail(
       <a class="breadcrumb" href="https://github.com/${escHtml(pkg.repoFullName)}/commit/${pkg.commitHash}" target="_blank" rel="noopener">${pkg.commitHash.slice(0, 7)}</a>
     </h1>
     ${
-      pkg.status !== "superseded"
+      pkg.status === "active" || canReset
         ? `<div style="display:flex;gap:0.5rem;align-items:center;margin:0">
-      <form method="POST" action="/pipeline/${escHtml(pipeline.id)}/package/${escHtml(pkg.commitHash.slice(0, 7))}/sync" style="margin:0">
+      ${
+        pkg.status === "active"
+          ? `<form method="POST" action="/pipeline/${escHtml(pipeline.id)}/package/${escHtml(pkg.commitHash.slice(0, 7))}/sync" style="margin:0">
         <button class="sync-btn" type="submit">Sync now</button>
-      </form>
-      <details class="action-menu">
+      </form>`
+          : ""
+      }
+      ${
+        canReset
+          ? `<details class="action-menu">
         <summary class="sync-btn">Actions ▾</summary>
         <div class="action-items">
           <form method="POST" action="/pipeline/${escHtml(pipeline.id)}/package/${escHtml(pkg.commitHash.slice(0, 7))}/retry">
@@ -602,7 +609,9 @@ export function renderPackageDetail(
             <button class="sync-btn danger" type="submit">Reset with current config</button>
           </form>
         </div>
-      </details>
+      </details>`
+          : ""
+      }
     </div>`
         : ""
     }

@@ -31,6 +31,17 @@ export function createServer(
     if (!pkg) return new Response("Package not found", { status: 404 });
     if (pkg.status === "superseded")
       return new Response("Cannot reset a superseded package", { status: 409 });
+    const newerExists = listPackages(pipelineId, 50).some(
+      (p) =>
+        p.id !== pkg.id &&
+        p.createdAt > pkg.createdAt &&
+        p.status !== "superseded",
+    );
+    if (newerExists)
+      return new Response(
+        "Cannot reset an older package — a newer deployment is active or complete",
+        { status: 409 },
+      );
     const effectiveCfg = pkg.configSnapshot ?? pipeline;
     const gitStepIds = effectiveCfg.steps
       .filter((s) => s.type === "git")
@@ -118,9 +129,20 @@ export function createServer(
         for (const step of pkg.steps) {
           history.push(...getStepHistory(pkg.id, step.stepId));
         }
-        return new Response(renderPackageDetail(pkg, pipeline, history), {
-          headers: htmlHeaders,
-        });
+        const canReset =
+          pkg.status !== "superseded" &&
+          !listPackages(pipelineId, 50).some(
+            (p) =>
+              p.id !== pkg.id &&
+              p.createdAt > pkg.createdAt &&
+              p.status !== "superseded",
+          );
+        return new Response(
+          renderPackageDetail(pkg, pipeline, history, canReset),
+          {
+            headers: htmlHeaders,
+          },
+        );
       },
 
       // POST /pipeline/:pipelineId/package/:commitId/sync — trigger single-package poll

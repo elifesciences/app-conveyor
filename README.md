@@ -27,6 +27,16 @@ The web UI (port 3000 by default) shows all pipelines and packages with per-step
 
 When a newer commit fully deploys, any older commits that are still in-flight are automatically marked as **superseded** ("Old") and removed from the active polling set — they will never deploy since the system has moved past them.
 
+### Package actions
+
+Each package detail page exposes actions depending on its state:
+
+- **Sync now** — triggers an immediate poll without waiting for the next interval. Only shown for active (in-progress) packages.
+- **Retry** — resets all non-git steps to pending and re-runs the package using the config it was originally created with. Useful when a transient failure needs another attempt.
+- **Reset with current config** — like Retry, but adopts the current pipeline configuration. Use this after a pipeline config change to re-run an in-flight package under the new config.
+
+Retry and Reset are only available on the newest non-superseded package. Resetting an older package would never succeed — its steps would observe the current world state (newer image tags, newer revisions) rather than what that commit originally tracked, and the engine would supersede it again on the next poll.
+
 ## Prerequisites
 
 This project uses [mise](https://mise.jdx.dev) to manage tool versions. Install mise, then run:
