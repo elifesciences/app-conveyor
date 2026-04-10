@@ -113,6 +113,69 @@ export interface KubeClient {
   customObjects: k8s.CustomObjectsApi;
 }
 
+/**
+ * Streams a Kubernetes watch using globalThis.fetch (which is already patched
+ * by installBunFetchTLSPatch to forward the agent's TLS options to Bun).
+ *
+ * k8s.Watch imports node-fetch directly, bypassing the globalThis.fetch patch,
+ * so we implement our own watch loop here using the standard ReadableStream API.
+ */
+export function startKubeWatch(
+  path: string,
+  onEvent: (type: string, obj: unknown) => void,
+  onDone: (err?: unknown) => void,
+): void {
+  const kc = getKubeConfig();
+  const cluster = kc.getCurrentCluster();
+  if (!cluster) {
+    onDone(new Error("No active cluster"));
+    return;
+  }
+
+  const url = new URL(`${cluster.server}${path}`);
+  url.searchParams.set("watch", "true");
+
+  (async () => {
+    // applyToFetchOptions adds auth headers and an https.Agent carrying the
+    // cluster CA/cert/key. The globalThis.fetch patch detects the agent and
+    // forwards its TLS options via Bun's non-standard `tls` fetch option.
+    const init = await kc.applyToFetchOptions({});
+    const response = await fetch(url.toString(), init as RequestInit);
+
+    if (!response.ok || !response.body) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          onDone();
+          return;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const data = JSON.parse(line) as { type: string; object: unknown };
+            onEvent(data.type, data.object);
+          } catch {
+            // ignore parse errors
+          }
+        }
+      }
+    } finally {
+      reader.cancel();
+    }
+  })().catch(onDone);
+}
+
 let _kc: k8s.KubeConfig | null = null;
 let _client: KubeClient | null = null;
 

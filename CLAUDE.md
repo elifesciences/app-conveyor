@@ -69,9 +69,11 @@ The frontend is server-side rendered HTML only — plain string templates in `sr
 
 ## Watch TLS
 
-`k8s.Watch` in `@kubernetes/client-node` v1.x calls `globalThis.fetch()` directly with an `agent` property in `RequestInit`, bypassing the `wrapHttpLibrary` mechanism used for API clients. Bun's `fetch()` ignores the agent (and its CA/cert/key), so the cluster CA is never applied — causing `unable to verify the first certificate` errors.
+`k8s.Watch` in `@kubernetes/client-node` v1.x imports `node-fetch` directly (`import fetch from 'node-fetch'`), bypassing both `globalThis.fetch` and the `wrapHttpLibrary` mechanism used for API clients. In Bun, `node-fetch` does not forward the `https.Agent`'s TLS options, so the cluster CA is never applied — causing `unable to verify the first certificate` errors.
 
-This is fixed in `kube.ts` via `installBunFetchTLSPatch()`, which wraps `globalThis.fetch` once at startup (called from `getKubeConfig()`). The patch detects an `agent` with TLS options and forwards them via Bun's non-standard `tls` fetch option. This covers both Watch and any other direct `fetch()` calls made by the library.
+The fix is to bypass `k8s.Watch` entirely. `kube.ts` exports `startKubeWatch()`, which implements the same streaming watch loop using `globalThis.fetch` (which is patched by `installBunFetchTLSPatch()` to forward agent TLS options via Bun's `tls` fetch option). It calls `kc.applyToFetchOptions()` to obtain the auth headers and agent, then reads the response body as a `ReadableStream`, splitting on newlines and JSON-parsing each event.
+
+`reconciler.ts` uses `startKubeWatch` instead of `new k8s.Watch(...)`.
 
 The test script `scripts/test-reconciler.sh` passes `KUBECONFIG` to the app process; the patch picks up the CA from the kubeconfig agent automatically, so no `NODE_EXTRA_CA_CERTS` workaround is needed.
 

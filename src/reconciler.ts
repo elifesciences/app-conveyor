@@ -1,6 +1,5 @@
-import * as k8s from "@kubernetes/client-node";
 import { Engine } from "./engine";
-import { getKubeClient, getKubeConfig } from "./kube";
+import { getKubeClient, startKubeWatch } from "./kube";
 import type { PipelineConfig } from "./types";
 
 const GROUP = "app-conveyor.elifesciences.org";
@@ -54,8 +53,7 @@ function makeDefaultK8s(): ReconcilerK8s {
       return (list as { items?: unknown[] }).items ?? [];
     },
     startWatch(path, onEvent, onDone) {
-      const watch = new k8s.Watch(getKubeConfig());
-      watch.watch(path, {}, onEvent, onDone).catch(onDone);
+      startKubeWatch(path, onEvent, onDone);
     },
   };
 }
