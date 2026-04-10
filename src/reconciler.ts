@@ -69,6 +69,7 @@ interface SharedMaps {
 
 export class Reconciler {
   private engines = new Map<string, EngineHandle>(); // key: "namespace/name"
+  private engineConfigs = new Map<string, string>(); // key → JSON.stringify(cfg)
   readonly pipelines: Map<string, PipelineConfig>;
   readonly pollers: Map<string, () => Promise<void>>;
   readonly packagePollers: Map<string, (commitPrefix: string) => Promise<void>>;
@@ -123,6 +124,7 @@ export class Reconciler {
     this.stopped = true;
     for (const engine of this.engines.values()) engine.stop();
     this.engines.clear();
+    this.engineConfigs.clear();
     this.pipelines.clear();
     this.pollers.clear();
     this.packagePollers.clear();
@@ -140,13 +142,19 @@ export class Reconciler {
   private onWatchDone(label: string): (err?: unknown) => void {
     return (err) => {
       if (this.stopped) return;
-      if (err) {
+      // A watch ending with a TimeoutError means the API server closed the
+      // connection after its server-side timeout (~5 min). This is expected
+      // and should reconnect silently. Only log genuine errors.
+      const isExpected =
+        !err || (err instanceof DOMException && err.name === "TimeoutError");
+      if (!isExpected) {
         console.error(
-          `[reconciler] watch ended with error in ${label}:`,
+          `[reconciler] watch error in ${label}:`,
           err instanceof Error ? err.message : String(err),
         );
       }
-      setTimeout(() => this.start(), 5000);
+      console.log(`[reconciler] reconnecting watch for ${label}`);
+      setTimeout(() => this.start().catch(console.error), 5000);
     };
   }
 
@@ -157,9 +165,14 @@ export class Reconciler {
       return;
     }
     const cfg: PipelineConfig = { id: cr.metadata.name, ...cr.spec };
+    const cfgJson = JSON.stringify(cfg);
 
     const existing = this.engines.get(key);
     if (existing) {
+      if (this.engineConfigs.get(key) === cfgJson) {
+        // Config unchanged — no need to restart the engine (e.g. watch reconnect).
+        return;
+      }
       existing.stop();
       console.log(`[reconciler] restarting engine for ${key}`);
     } else {
@@ -168,6 +181,7 @@ export class Reconciler {
 
     const engine = this.createEngine(cfg);
     this.engines.set(key, engine);
+    this.engineConfigs.set(key, cfgJson);
     this.pipelines.set(cr.metadata.name, cfg);
     this.pollers.set(cr.metadata.name, () => engine.poll());
     this.packagePollers.set(cr.metadata.name, (prefix) =>
@@ -188,6 +202,7 @@ export class Reconciler {
     if (engine) {
       engine.stop();
       this.engines.delete(key);
+      this.engineConfigs.delete(key);
     }
     this.pipelines.delete(name);
     this.pollers.delete(name);

@@ -131,7 +131,36 @@ test("ADDED event starts a new engine and populates maps", async () => {
   expect(reconciler.pipelines.has("my-app")).toBe(true);
 });
 
-test("MODIFIED event stops old engine and starts a new one", async () => {
+test("MODIFIED event with changed config stops old engine and starts a new one", async () => {
+  const k8s = new FakeK8s([makeCR("my-app")]);
+  const { created, factory } = makeEngineFactory();
+  const reconciler = new Reconciler(["default"], k8s, factory);
+  await reconciler.start();
+
+  const first = created[0];
+  if (!first) throw new Error("expected first engine");
+
+  // Fire MODIFIED with a different spec (e.g. different pipeline name).
+  const modified = {
+    metadata: { name: "my-app", namespace: "default" },
+    spec: {
+      name: "Pipeline my-app v2",
+      steps: [
+        { id: "src", type: "git" as const, repo: "org/repo", branch: "main" },
+      ],
+    },
+  };
+  k8s.fire("MODIFIED", modified);
+
+  const second = created[1];
+  if (!second) throw new Error("expected second engine");
+
+  expect(first.stopped).toBe(true);
+  expect(second.started).toBe(true);
+  expect(reconciler.pipelines.has("my-app")).toBe(true);
+});
+
+test("MODIFIED event with unchanged config does not restart engine", async () => {
   const k8s = new FakeK8s([makeCR("my-app")]);
   const { created, factory } = makeEngineFactory();
   const reconciler = new Reconciler(["default"], k8s, factory);
@@ -142,12 +171,8 @@ test("MODIFIED event stops old engine and starts a new one", async () => {
 
   k8s.fire("MODIFIED", makeCR("my-app"));
 
-  const second = created[1];
-  if (!second) throw new Error("expected second engine");
-
-  expect(first.stopped).toBe(true);
-  expect(second.started).toBe(true);
-  expect(reconciler.pipelines.has("my-app")).toBe(true);
+  expect(created.length).toBe(1); // no new engine created
+  expect(first.stopped).toBe(false); // existing engine untouched
 });
 
 test("DELETED event stops engine and removes it from maps", async () => {
